@@ -58,6 +58,30 @@ class UserTranslator(TranslationEngine):
         self.auth_client = settings.auth_client
         self.translator_key = translator_key
         self.is_llm = self._check_is_llm(translator_key)
+        self._warn_if_custom_system_prompt_unsupported()
+
+    def _warn_if_custom_system_prompt_unsupported(self) -> None:
+        """Log when a custom system prompt can't reach the hosted backend.
+
+        The web API request has no field for user-defined system instructions,
+        so they cannot be honoured in account mode. The LLMs settings page
+        greys the field out and explains this; this log covers the case where
+        an older stored setting is still enabled.
+        """
+        if not self.is_llm or not self.settings:
+            return
+        try:
+            llm_settings = self.settings.get_llm_settings()
+        except Exception:
+            return
+        if llm_settings.get('custom_system_instructions_enabled') and \
+                (llm_settings.get('custom_system_instructions') or '').strip():
+            logger.warning(
+                "Custom system instructions are set but cannot be sent through the "
+                "ComicLabs web API; they are ignored for '%s'. Use a direct API key "
+                "or the Custom translator instead.",
+                self.translator_key,
+            )
 
     def _check_is_llm(self, translator_key: str) -> bool:
         llm_ids = ["GPT", "Claude", "Gemini", "Deepseek"]
