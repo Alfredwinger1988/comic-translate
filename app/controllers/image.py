@@ -13,6 +13,12 @@ from app.ui.commands.inpaint import PatchInsertCommand
 from app.ui.commands.inpaint import PatchCommandBase
 from app.ui.commands.box import AddTextItemCommand
 from app.ui.list_view_image_loader import ListViewImageLoader
+from app.ui.list_view import (
+    STATUS_DONE,
+    STATUS_FAILED,
+    STATUS_PROCESSING,
+    STATUS_QUEUED,
+)
 from app.thread_worker import GenericWorker
 from app.path_materialization import ensure_path_materialized
 from app.controllers.psd_importer import ImportedPsdPage, import_psd_files, prepare_psd_font_catalog
@@ -34,7 +40,11 @@ class ImageStateController:
         self._suppress_dismiss_message_ids: set[int] = set()
         self._active_transient_skip_message: MMessage | None = None
         self._force_default_view_once = False
-        
+        # path -> queued/processing/done/failed for the batch currently running
+        # (or the last one that ran). Drives the badges in the page list.
+        self.page_status: dict[str, str] = {}
+        self._batch_order: list[str] = []
+
         # Initialize lazy image loader for list view
         self.page_list_loader = ListViewImageLoader(
             self.main.page_list,
@@ -555,9 +565,78 @@ class ImageStateController:
                 page_list.addItem(list_item)
 
             self.page_list_loader.set_file_paths(self.main.image_files)
+            # Rebuilding drops the per-item roles, so re-apply known statuses.
+            self._reapply_page_statuses()
         finally:
             page_list.setUpdatesEnabled(True)
             page_list.viewport().update()
+
+    # ------------------------------------------------------------------
+    # Batch status badges
+    # ------------------------------------------------------------------
+    def _reapply_page_statuses(self):
+        if not self.page_status:
+            return
+        for path, status in self.page_status.items():
+            self.main.page_list.set_page_status(path, status)
+
+    def set_page_status(self, path: str, status: str, progress: float | None = None):
+        if not path:
+            return
+        if status:
+            self.page_status[path] = status
+        else:
+            self.page_status.pop(path, None)
+        self.main.page_list.set_page_status(path, status, progress)
+
+    def mark_batch_queued(self, paths: List[str]):
+        """Reset badges and mark every page of a starting batch as queued."""
+        self.page_status.clear()
+        self._batch_order = list(paths or [])
+        self.main.page_list.clear_page_statuses()
+        for path in self._batch_order:
+            self.set_page_status(path, STATUS_QUEUED)
+
+    def mark_batch_progress(self, index: int, step: int, total_steps: int):
+        """Update badges from the pipeline's progress signal.
+
+        The pipeline reports (index, step); anything before `index` that is
+        still marked queued/processing has therefore finished, which also
+        covers pages that produce no render state (user-skipped ones).
+        """
+        order = self._batch_order
+        if not order or index < 0 or index >= len(order):
+            return
+
+        for earlier in order[:index]:
+            if self.page_status.get(earlier) in (STATUS_QUEUED, STATUS_PROCESSING):
+                self.set_page_status(earlier, STATUS_DONE)
+
+        path = order[index]
+        if self.page_status.get(path) == STATUS_FAILED:
+            return
+        fraction = (step / total_steps) if total_steps else 0.0
+        self.set_page_status(path, STATUS_PROCESSING, fraction)
+
+    def mark_batch_failed(self, path: str):
+        if path in self.page_status or path in self._batch_order:
+            self.set_page_status(path, STATUS_FAILED)
+
+    def mark_batch_done(self, path: str):
+        if self.page_status.get(path) in (STATUS_QUEUED, STATUS_PROCESSING):
+            self.set_page_status(path, STATUS_DONE)
+
+    def finalize_batch_statuses(self, was_cancelled: bool):
+        """Settle badges when the queue stops: finish or un-queue what's left."""
+        for path in list(self._batch_order):
+            status = self.page_status.get(path)
+            if status == STATUS_PROCESSING and not was_cancelled:
+                self.set_page_status(path, STATUS_DONE)
+            elif status == STATUS_QUEUED or (status == STATUS_PROCESSING and was_cancelled):
+                self.set_page_status(path, "")
+
+    def get_failed_batch_paths(self) -> List[str]:
+        return [p for p in self._batch_order if self.page_status.get(p) == STATUS_FAILED]
 
     def remove_page_list_rows(self, removed_indices: list[int]):
         """Remove list rows in place to avoid rebuilding the entire sidebar."""
@@ -1216,6 +1295,9 @@ class ImageStateController:
         may appear first, while text items become available slightly later in
         image_states. We reload the current page state once the render payload is ready.
         """
+        # The page finished the pipeline regardless of what is on screen.
+        self.mark_batch_done(file_path)
+
         if self.main.webtoon_mode:
             return
         if self.main.curr_img_idx < 0 or self.main.curr_img_idx >= len(self.main.image_files):
@@ -1264,6 +1346,7 @@ class ImageStateController:
 
     def on_image_skipped(self, image_path: str, skip_reason: str, error: str):
         summarized_error = self._summarize_skip_error(error)
+        self.mark_batch_failed(image_path)
         if hasattr(self.main, "register_batch_skip"):
             self.main.register_batch_skip(image_path, skip_reason, summarized_error)
 
