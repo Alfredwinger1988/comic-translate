@@ -16,6 +16,7 @@ from app.ui.settings.settings_page import SettingsPage
 from app.account.config import WEB_API_TRANSLATE_URL
 from modules.utils.exceptions import InsufficientCreditsException, ContentFlaggedException
 from modules.utils.platform_utils import get_client_os
+from modules.utils.retry import with_retry
 
 
 logger = logging.getLogger(__name__)
@@ -178,63 +179,29 @@ class UserTranslator(TranslationEngine):
             "X-Client-OS": client_os
         }
 
-        response = self._session.post(
-            self.api_url, 
-            headers=headers, 
-            json=request_payload, 
-            timeout=120
-        ) 
+        # Retry transient failures (429/5xx, dropped connections) with
+        # exponential backoff. The POST + error mapping both happen inside the
+        # retried call so a retryable status actually surfaces as an exception
+        # the retry loop can see. Insufficient credits / flagged content bubble
+        # up unchanged — they are permanent and must surface immediately.
+        def _post_and_raise():
+            resp = self._session.post(
+                self.api_url,
+                headers=headers,
+                json=request_payload,
+                timeout=120,
+            )
+            self._map_response_errors(resp)
+            return resp
+
         after_request_t = time.perf_counter()
-        try:
-            response.raise_for_status()
-        except requests.exceptions.HTTPError as e:
-            try:
-                error_data = response.json()
-                detail = error_data.get('detail')
-                description = ""
-
-                # detail can be a string, a dict, or a list (validation errors)
-                if isinstance(detail, dict):
-                    description = detail.get('error_description') or detail.get('message')
-                    if not description and detail.get('type'):
-                        description = f"Error type: {detail.get('type')}"
-                elif isinstance(detail, list):
-                    # Pydantic validation errors
-                    msgs = []
-                    for err in detail:
-                        loc = ".".join(str(x) for x in err.get('loc', []))
-                        msg = err.get('msg', '')
-                        msgs.append(f"{loc}: {msg}")
-                    description = "; ".join(msgs)
-                else:
-                    description = str(detail) if detail else ""
-
-                if response.status_code == 402:
-                    if isinstance(detail, dict) and detail.get('type') == 'INSUFFICIENT_CREDITS':
-                        raise InsufficientCreditsException(description)
-                    # Implicit fallback for 402
-                    raise InsufficientCreditsException(description)
-                
-                # Check for Content Flagged errors (400)
-                if response.status_code == 400:
-                    is_flagged = False
-                    if isinstance(detail, dict) and detail.get('type') == 'CONTENT_FLAGGED_UNSAFE':
-                        is_flagged = True
-                    elif "flagged as unsafe" in str(description).lower() or "blocked by" in str(description).lower():
-                        is_flagged = True
-                    
-                    if is_flagged:
-                        raise ContentFlaggedException(description, context="Translation")
-
-                # For other errors (400, 500 etc), raise a clear exception with the server message
-                if description:
-                    raise Exception(f"Server Error ({response.status_code}): {description}") from e
-
-            except ValueError:
-                # JSON parsing failed, just raise the original error
-                pass
-            # Re-raise the original error if we didn't handle it
-            raise e
+        response = with_retry(
+            _post_and_raise,
+            self.settings,
+            label=f"ComicLabs web API ({self.translator_key})",
+            log=logger,
+        )
+        after_request_t = time.perf_counter()
 
         # 7. Process Response
         if response.status_code == 200:
@@ -271,7 +238,66 @@ class UserTranslator(TranslationEngine):
             )
 
         return blk_list
-    
+
+    def _map_response_errors(self, response) -> None:
+        """Raise the right exception for a non-2xx web API response.
+
+        Extracted so it can run inside the retried call: a retryable status
+        (429/5xx) must surface as an exception for the retry loop to see.
+        Permanent states — 402 insufficient credits, 400 content flagged —
+        raise their dedicated exception types and are never retried.
+        """
+        try:
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            try:
+                error_data = response.json()
+                detail = error_data.get('detail')
+                description = ""
+
+                # detail can be a string, a dict, or a list (validation errors)
+                if isinstance(detail, dict):
+                    description = detail.get('error_description') or detail.get('message')
+                    if not description and detail.get('type'):
+                        description = f"Error type: {detail.get('type')}"
+                elif isinstance(detail, list):
+                    # Pydantic validation errors
+                    msgs = []
+                    for err in detail:
+                        loc = ".".join(str(x) for x in err.get('loc', []))
+                        msg = err.get('msg', '')
+                        msgs.append(f"{loc}: {msg}")
+                    description = "; ".join(msgs)
+                else:
+                    description = str(detail) if detail else ""
+
+                if response.status_code == 402:
+                    if isinstance(detail, dict) and detail.get('type') == 'INSUFFICIENT_CREDITS':
+                        raise InsufficientCreditsException(description)
+                    # Implicit fallback for 402
+                    raise InsufficientCreditsException(description)
+
+                # Check for Content Flagged errors (400)
+                if response.status_code == 400:
+                    is_flagged = False
+                    if isinstance(detail, dict) and detail.get('type') == 'CONTENT_FLAGGED_UNSAFE':
+                        is_flagged = True
+                    elif "flagged as unsafe" in str(description).lower() or "blocked by" in str(description).lower():
+                        is_flagged = True
+
+                    if is_flagged:
+                        raise ContentFlaggedException(description, context="Translation")
+
+                # For other errors (400, 500 etc), raise a clear exception with the server message
+                if description:
+                    raise Exception(f"Server Error ({response.status_code}): {description}") from e
+
+            except ValueError:
+                # JSON parsing failed, just raise the original error
+                pass
+            # Re-raise the original error if we didn't handle it
+            raise e
+
     def update_credits(self, credits: Optional[Any]) -> None:
         if credits is None:
             return

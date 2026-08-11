@@ -3,6 +3,7 @@ import requests
 
 from .base import TraditionalTranslation
 from ..utils.textblock import TextBlock
+from ..utils.retry import with_retry
 
 
 class YandexTranslation(TraditionalTranslation):
@@ -22,6 +23,7 @@ class YandexTranslation(TraditionalTranslation):
         credentials = settings.get_credentials(settings.ui.tr("Yandex"))
         self.api_key = credentials.get('api_key', '')
         self.folder_id = credentials.get('folder_id', '')
+        self._settings_ref = settings
         
     def translate(self, blk_list: list[TextBlock]) -> list[TextBlock]:
         # Filter out empty texts
@@ -49,14 +51,13 @@ class YandexTranslation(TraditionalTranslation):
                 "folderId": self.folder_id  # This is REQUIRED for user accounts
             }
             
-            # Make the API request
-            response = requests.post(
-                url, 
-                headers=headers, 
-                json=body,
-                timeout=30
+            # Make the API request (retried on transient failures; errors are
+            # raised inside so the retry loop can see a retryable status)
+            response = with_retry(
+                lambda: self._post_yandex(url, headers, body),
+                getattr(self, "_settings_ref", None),
+                label=f"Yandex Translator ({self.target_lang_code})",
             )
-            response.raise_for_status()  # Raise exception for HTTP errors
             
             # Process the response
             result = response.json()
@@ -75,7 +76,13 @@ class YandexTranslation(TraditionalTranslation):
                 blk.translation = ""
             
         return blk_list
-    
+
+    def _post_yandex(self, url, headers, body) -> requests.Response:
+        """POST to the Yandex Translate endpoint and surface errors."""
+        resp = requests.post(url, headers=headers, json=body, timeout=30)
+        resp.raise_for_status()
+        return resp
+
     def preprocess_language_code(self, lang_code: str) -> str:
         if not lang_code:
             return lang_code

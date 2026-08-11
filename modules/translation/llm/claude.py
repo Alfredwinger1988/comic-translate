@@ -5,6 +5,7 @@ import json
 
 from .base import BaseLLMTranslation
 from ...utils.translator_utils import MODEL_MAP
+from ...utils.retry import with_retry
 
 
 class ClaudeTranslation(BaseLLMTranslation):
@@ -77,14 +78,22 @@ class ClaudeTranslation(BaseLLMTranslation):
                 }
             ]
 
-        # Make the API request
+        # Make the API request (retried on transient failures)
+        return with_retry(
+            lambda: self._post_claude(payload),
+            getattr(self, "_settings_ref", None),
+            label=f"Anthropic API ({self.model_name})",
+        )
+
+    def _post_claude(self, payload) -> str:
+        """POST to the Anthropic Messages endpoint and surface errors."""
         response = requests.post(
             self.api_url,
             headers=self.headers,
             data=json.dumps(payload),
             timeout=self.timeout
         )
-        
+
         # Handle response
         if response.status_code == 200:
             response_data = response.json()

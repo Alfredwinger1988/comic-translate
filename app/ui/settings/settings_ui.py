@@ -222,6 +222,10 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.extra_context = self.llms_page.extra_context
         self.custom_system_instructions = self.llms_page.custom_system_instructions
         self.enable_custom_system_prompt = self.llms_page.enable_custom_system_prompt
+        self.retry_enabled_checkbox = self.llms_page.retry_enabled_checkbox
+        self.retry_max_attempts_spin = self.llms_page.retry_max_attempts_spin
+        self.retry_base_delay_spin = self.llms_page.retry_base_delay_spin
+        self.retry_max_delay_spin = self.llms_page.retry_max_delay_spin
 
         # Text rendering
         self.min_font_spinbox = self.text_rendering_page.min_font_spinbox

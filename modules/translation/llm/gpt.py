@@ -5,6 +5,7 @@ import json
 
 from .base import BaseLLMTranslation
 from ...utils.translator_utils import MODEL_MAP
+from ...utils.retry import with_retry
 
 
 class GPTTranslation(BaseLLMTranslation):
@@ -88,7 +89,11 @@ class GPTTranslation(BaseLLMTranslation):
             "top_p": self.top_p,
         }
 
-        return self._make_api_request(payload, headers)
+        return with_retry(
+            lambda: self._make_api_request(payload, headers),
+            getattr(self, "_settings_ref", None),
+            label=f"OpenAI-compatible API ({self.model_name})",
+        )
     
     def _make_api_request(self, payload, headers):
         """

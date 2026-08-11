@@ -1,4 +1,5 @@
 from typing import Any
+import logging
 import numpy as np
 from abc import abstractmethod
 import base64
@@ -7,6 +8,7 @@ import imkit as imk
 from ..base import LLMTranslation
 from ...utils.textblock import TextBlock
 from ...utils.translator_utils import get_raw_text, set_texts_from_json
+from ...utils.retry import with_retry
 
 
 class BaseLLMTranslation(LLMTranslation):
@@ -40,6 +42,9 @@ class BaseLLMTranslation(LLMTranslation):
             **kwargs: Engine-specific initialization parameters
         """
         llm_settings = settings.get_llm_settings()
+        # Keep a reference for live retry settings (read at call time, so a
+        # raise of the attempt cap is honoured without recreating the engine).
+        self._settings_ref = settings
         self.source_lang = source_lang
         self.target_lang = target_lang
         self.img_as_llm_input = llm_settings.get('image_input_enabled', True)
@@ -84,8 +89,17 @@ class BaseLLMTranslation(LLMTranslation):
         entire_raw_text = get_raw_text(blk_list)
         system_prompt = self.get_final_system_prompt()
         user_prompt = f"{extra_context}\nMake the translation sound as natural as possible.\nTranslate this:\n{entire_raw_text}"
-        
-        entire_translated_text = self._perform_translation(user_prompt, system_prompt, image)
+
+        # Retry transient failures (429/5xx, dropped connections) with
+        # exponential backoff. Permanent errors — invalid credentials, out of
+        # credits, flagged content — are re-raised immediately by with_retry.
+        settings_ref = getattr(self, "_settings_ref", None)
+        entire_translated_text = with_retry(
+            lambda: self._perform_translation(user_prompt, system_prompt, image),
+            settings_ref,
+            label=f"LLM translation ({getattr(self, 'model', None) or type(self).__name__})",
+            log=logging.getLogger(__name__),
+        )
         set_texts_from_json(blk_list, entire_translated_text)
             
         return blk_list

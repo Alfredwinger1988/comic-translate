@@ -174,6 +174,10 @@ class SettingsPage(QtWidgets.QWidget):
             'custom_system_instructions_enabled': self.ui.enable_custom_system_prompt.isChecked(),
         }
 
+    def get_retry_settings(self):
+        """Retry/backoff configuration for transient translation failures."""
+        return self.ui.llms_page.get_retry_settings()
+
     @staticmethod
     def _decode_prompt_presets(raw) -> dict:
         """Parse the JSON blob holding named custom-prompt presets.
@@ -188,6 +192,14 @@ class SettingsPage(QtWidgets.QWidget):
         except (ValueError, TypeError):
             return {}
         return data if isinstance(data, dict) else {}
+
+    def _save_retry_settings(self, settings: QSettings) -> None:
+        settings.beginGroup('llm')
+        settings.setValue(
+            'retry_settings',
+            json.dumps(self.get_retry_settings()),
+        )
+        settings.endGroup()
 
     def _save_prompt_presets(self, settings: QSettings) -> None:
         presets = self.ui.llms_page.get_prompt_presets()
@@ -368,6 +380,10 @@ class SettingsPage(QtWidgets.QWidget):
         settings.remove('archive_save_as')
         settings.endGroup()
 
+        # Retry settings are stored as a JSON blob (they contain floats that the
+        # generic group writer would store as strings without a type hint).
+        self._save_retry_settings(settings)
+
         # Presets are a JSON blob, so they bypass the generic group writer.
         self._save_prompt_presets(settings)
 
@@ -472,6 +488,11 @@ class SettingsPage(QtWidgets.QWidget):
         )
         self.ui.llms_page.set_prompt_presets(
             self._decode_prompt_presets(settings.value('custom_system_prompt_presets', '', type=str))
+        )
+        # Retry/backoff settings; absent in projects/installs before this
+        # feature existed, so defaults are applied.
+        self.ui.llms_page.set_retry_settings(
+            self._decode_prompt_presets(settings.value('retry_settings', '', type=str))
         )
         settings.endGroup()
 

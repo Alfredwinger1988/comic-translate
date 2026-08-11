@@ -4,6 +4,7 @@ import requests
 
 from .base import BaseLLMTranslation
 from ...utils.translator_utils import MODEL_MAP
+from ...utils.retry import with_retry
 
 
 class GeminiTranslation(BaseLLMTranslation):
@@ -102,23 +103,17 @@ class GeminiTranslation(BaseLLMTranslation):
         if system_prompt:
             payload["systemInstruction"] = {"parts": [{"text": system_prompt}]}
         
-        # Send request to Gemini API
+        # Send request to Gemini API (retried on transient failures)
         headers = {
             "Content-Type": "application/json"
         }
-        
-        response = requests.post(
-            url, 
-            headers=headers, 
-            json=payload,
-            timeout=self.timeout
+
+        response = with_retry(
+            lambda: self._post_gemini(url, headers, payload),
+            getattr(self, "_settings_ref", None),
+            label=f"Gemini API ({self.model_name})",
         )
-        
-        # Handle response
-        if response.status_code != 200:
-            error_msg = f"API request failed with status code {response.status_code}: {response.text}"
-            raise Exception(error_msg)
-        
+
         # Extract text from response
         response_data = response.json()
         
@@ -135,5 +130,13 @@ class GeminiTranslation(BaseLLMTranslation):
         for part in parts:
             if "text" in part:
                 result += part["text"]
-        
+
         return result
+
+    def _post_gemini(self, url, headers, payload) -> requests.Response:
+        """POST to the Gemini endpoint and surface errors."""
+        response = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
+        if response.status_code != 200:
+            error_msg = f"API request failed with status code {response.status_code}: {response.text}"
+            raise Exception(error_msg)
+        return response

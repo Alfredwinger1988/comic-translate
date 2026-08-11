@@ -7,6 +7,7 @@ from ..dayu_widgets.combo_box import MComboBox
 from ..dayu_widgets.divider import MDivider
 from ..dayu_widgets.line_edit import MLineEdit
 from ..dayu_widgets.push_button import MPushButton
+from ..dayu_widgets.spin_box import MSpinBox, MDoubleSpinBox
 
 
 class LlmsPage(QtWidgets.QWidget):
@@ -50,6 +51,8 @@ class LlmsPage(QtWidgets.QWidget):
         # Right
         right_layout = QtWidgets.QVBoxLayout()
         self._build_custom_system_prompt_section(right_layout)
+        right_layout.addSpacing(10)
+        self._build_retry_section(right_layout)
         right_layout.addSpacing(10)
         right_layout.addStretch(1)
 
@@ -205,6 +208,99 @@ class LlmsPage(QtWidgets.QWidget):
         self._prompt_presets.pop(name, None)
         self.preset_name_input.clear()
         self._refresh_preset_combo()
+
+    # ------------------------------------------------------------------
+    # Retry on transient failures
+    # ------------------------------------------------------------------
+    def _build_retry_section(self, layout: QtWidgets.QVBoxLayout) -> None:
+        layout.addWidget(MDivider(self.tr("Retry on Temporary Errors")))
+
+        self.retry_enabled_checkbox = MCheckBox(
+            self.tr("Retry a translation when the service fails temporarily")
+        )
+        self.retry_enabled_checkbox.setChecked(True)
+        layout.addWidget(self.retry_enabled_checkbox)
+
+        description = MLabel(
+            self.tr(
+                "Rate limits (HTTP 429), overloaded servers (5xx) and dropped "
+                "connections are retried with exponential backoff. Invalid keys, "
+                "out-of-credits and blocked content are never retried — they fail "
+                "immediately."
+            )
+        ).secondary()
+        description.setWordWrap(True)
+        layout.addWidget(description)
+
+        # Controls hidden while retries are disabled.
+        self.retry_controls = QtWidgets.QWidget()
+        retry_controls_layout = QtWidgets.QVBoxLayout(self.retry_controls)
+        retry_controls_layout.setContentsMargins(0, 0, 0, 0)
+
+        attempts_row = QtWidgets.QHBoxLayout()
+        attempts_row.addWidget(MLabel(self.tr("Max attempts:")))
+        self.retry_max_attempts_spin = MSpinBox().small()
+        self.retry_max_attempts_spin.setRange(1, 10)
+        self.retry_max_attempts_spin.setValue(3)
+        attempts_row.addWidget(self.retry_max_attempts_spin)
+        attempts_row.addStretch(1)
+        retry_controls_layout.addLayout(attempts_row)
+
+        base_delay_row = QtWidgets.QHBoxLayout()
+        base_delay_row.addWidget(MLabel(self.tr("Initial delay (s):")))
+        self.retry_base_delay_spin = MDoubleSpinBox().small()
+        self.retry_base_delay_spin.setRange(0.1, 30.0)
+        self.retry_base_delay_spin.setSingleStep(0.5)
+        self.retry_base_delay_spin.setValue(2.0)
+        base_delay_row.addWidget(self.retry_base_delay_spin)
+        base_delay_row.addStretch(1)
+        retry_controls_layout.addLayout(base_delay_row)
+
+        max_delay_row = QtWidgets.QHBoxLayout()
+        max_delay_row.addWidget(MLabel(self.tr("Max delay (s):")))
+        self.retry_max_delay_spin = MDoubleSpinBox().small()
+        self.retry_max_delay_spin.setRange(1.0, 600.0)
+        self.retry_max_delay_spin.setSingleStep(5.0)
+        self.retry_max_delay_spin.setValue(60.0)
+        max_delay_row.addWidget(self.retry_max_delay_spin)
+        max_delay_row.addStretch(1)
+        retry_controls_layout.addLayout(max_delay_row)
+
+        layout.addWidget(self.retry_controls)
+        self.retry_enabled_checkbox.toggled.connect(
+            lambda on: self.retry_controls.setEnabled(on)
+        )
+        self.retry_controls.setEnabled(self.retry_enabled_checkbox.isChecked())
+
+    def get_retry_settings(self) -> dict:
+        """Current retry configuration, as consumed by modules/utils/retry.py."""
+        return {
+            "enabled": bool(self.retry_enabled_checkbox.isChecked()),
+            "max_attempts": int(self.retry_max_attempts_spin.value()),
+            "base_delay": float(self.retry_base_delay_spin.value()),
+            "max_delay": float(self.retry_max_delay_spin.value()),
+        }
+
+    def set_retry_settings(self, data: dict) -> None:
+        """Apply saved retry settings; missing values keep their defaults."""
+        data = data or {}
+        self.retry_enabled_checkbox.setChecked(bool(data.get("enabled", True)))
+        try:
+            if data.get("max_attempts") is not None:
+                self.retry_max_attempts_spin.setValue(int(data["max_attempts"]))
+        except (TypeError, ValueError):
+            pass
+        try:
+            if data.get("base_delay") is not None:
+                self.retry_base_delay_spin.setValue(float(data["base_delay"]))
+        except (TypeError, ValueError):
+            pass
+        try:
+            if data.get("max_delay") is not None:
+                self.retry_max_delay_spin.setValue(float(data["max_delay"]))
+        except (TypeError, ValueError):
+            pass
+        self.retry_controls.setEnabled(self.retry_enabled_checkbox.isChecked())
 
     def set_extra_context_unlimited(self, enabled: bool) -> None:
         self._extra_context_limit = None if enabled else self.DEFAULT_EXTRA_CONTEXT_LIMIT
