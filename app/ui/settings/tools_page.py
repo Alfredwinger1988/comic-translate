@@ -33,6 +33,21 @@ class ToolsPage(QtWidgets.QWidget):
         detector_widget, self.detector_combo = create_title_and_combo(self.tr("Text Detector"), self.detectors, h4=True)
         set_combo_box_width(self.detector_combo, self.detectors)
 
+        # Opt-in: write the script-detected language of each page back into the
+        # project instead of leaving every page on "Auto".
+        self.detect_page_language_checkbox = MCheckBox(
+            self.tr("Detect the source language of each page")
+        )
+        self.detect_page_language_checkbox.setChecked(False)
+        detect_page_language_hint = MLabel(
+            self.tr(
+                "Only while Source Language is \"Auto\". After detection the page keeps the "
+                "recognised language, so mixed-language collections do not have to be set up "
+                "page by page. Pages whose script is unclear stay on \"Auto\"."
+            )
+        ).secondary()
+        detect_page_language_hint.setWordWrap(True)
+
         inpainting_label = MLabel(self.tr("Image Cleaning")).h4()
         inpainter_widget, self.inpainter_combo = create_title_and_combo(self.tr("Inpainter"), self.inpainters, h4=False)
         set_combo_box_width(self.inpainter_combo, self.inpainters)
@@ -109,6 +124,8 @@ class ToolsPage(QtWidgets.QWidget):
         layout.addWidget(translator_widget)
         layout.addSpacing(10)
         layout.addWidget(detector_widget)
+        layout.addWidget(self.detect_page_language_checkbox)
+        layout.addWidget(detect_page_language_hint)
         layout.addSpacing(10)
         layout.addWidget(ocr_widget)
         layout.addSpacing(10)

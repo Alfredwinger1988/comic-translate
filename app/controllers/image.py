@@ -1276,6 +1276,31 @@ class ImageStateController:
     def force_default_view_on_next_image_load(self):
         self._force_default_view_once = True
 
+    def apply_detected_source_language(self, file_path: str, language: str) -> bool:
+        """Store a language the pipeline recognised for one page.
+
+        Returns True when the stored value actually changed. Only the current
+        page's combo is refreshed: the page list already shows every page, and
+        the combo applies to the displayed page. ``_build_image_state`` persists
+        the per-page value on the next save, so nothing else needs touching.
+        """
+        state = self.main.image_states.get(file_path)
+        if not isinstance(state, dict):
+            return False
+        canonical = to_canonical_language_name(language, self.main.lang_mapping)
+        if not canonical or canonical == state.get('source_lang'):
+            return False
+
+        state['source_lang'] = canonical
+
+        if self.main.curr_img_idx >= 0 and self.main.curr_img_idx < len(self.main.image_files):
+            if self.main.image_files[self.main.curr_img_idx] == file_path:
+                ui_label = to_ui_language_label(canonical, self.main.reverse_lang_mapping)
+                self.main.s_combo.blockSignals(True)
+                self.main.s_combo.setCurrentText(ui_label)
+                self.main.s_combo.blockSignals(False)
+        return True
+
     def on_image_processed(self, index: int, image: np.ndarray, image_path: str):
         file_on_display = self.main.image_files[self.main.curr_img_idx]
         current_batch_file = self.main.selected_batch[index] if self.main.selected_batch else self.main.image_files[index]

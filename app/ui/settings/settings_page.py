@@ -157,6 +157,15 @@ class SettingsPage(QtWidgets.QWidget):
             return False
         return self.ui.use_gpu_checkbox.isChecked()
 
+    def is_page_language_detection_enabled(self) -> bool:
+        """Whether a batch run may replace a page's "Auto" source language.
+
+        Opt-in, default off: turning it on changes which OCR engine a page is
+        routed to, so existing projects must keep their current behaviour until
+        the user asks for the new one.
+        """
+        return bool(self.ui.detect_page_language_checkbox.isChecked())
+
     def get_llm_settings(self):
         return {
             'extra_context': self.ui.extra_context.toPlainText(),
@@ -268,6 +277,7 @@ class SettingsPage(QtWidgets.QWidget):
                 'detector': self.get_tool_selection('detector'),
                 'inpainter': self.get_tool_selection('inpainter'),
                 'use_gpu': self.is_gpu_enabled(),
+                'detect_page_language': self.is_page_language_detection_enabled(),
                 'hd_strategy': self.get_hd_strategy_settings()
             },
             'llm': self.get_llm_settings(),
@@ -427,6 +437,11 @@ class SettingsPage(QtWidgets.QWidget):
             self.ui.use_gpu_checkbox.setChecked(settings.value('use_gpu', False, type=bool))
         else:
             self.ui.use_gpu_checkbox.setChecked(False)
+
+        # Absent in projects/installs from before per-page detection existed.
+        self.ui.detect_page_language_checkbox.setChecked(
+            settings.value('detect_page_language', False, type=bool)
+        )
 
         # Load HD strategy settings
         settings.beginGroup('hd_strategy')

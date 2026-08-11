@@ -51,6 +51,9 @@ class SettingsSnapshotProxy:
     def get_export_settings(self) -> dict:
         return dict(self._snapshot.export_settings)
 
+    def is_page_language_detection_enabled(self) -> bool:
+        return bool(self._snapshot.detect_page_language)
+
     def __getattr__(self, name):
         return getattr(object.__getattribute__(self, "_real_settings"), name)
 
@@ -69,6 +72,10 @@ class BatchSettingsSnapshot:
         self.llm_settings: dict = dict(settings_page.get_llm_settings())
         self.hd_strategy: dict = dict(settings_page.get_hd_strategy_settings())
         self.export_settings: dict = dict(settings_page.get_export_settings())
+        try:
+            self.detect_page_language = bool(settings_page.is_page_language_detection_enabled())
+        except Exception:
+            self.detect_page_language = False
         try:
             self.render_settings = main.render_settings()
         except Exception:
@@ -131,6 +138,22 @@ class BatchSettingsOverride:
 
         self._active = True
         logger.info("Retry using original batch settings: %s", self.snapshot.describe())
+
+    def note_language_detected(self, path: str, source_lang: str) -> None:
+        """Keep a language detected *during* the run from being rolled back.
+
+        ``restore()`` puts the pre-retry languages back. A page whose language
+        was just recognised must keep the new value, so both the snapshot and
+        the saved "previous" value are updated in place.
+        """
+        if not source_lang:
+            return
+        previous = self._previous_languages.get(path)
+        if previous is not None:
+            self._previous_languages[path] = (source_lang, previous[1])
+        frozen = self.snapshot.languages.get(path)
+        if frozen is not None:
+            self.snapshot.languages[path] = (source_lang, frozen[1])
 
     def restore(self) -> None:
         if not self._active:

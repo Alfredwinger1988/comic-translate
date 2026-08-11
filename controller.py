@@ -55,6 +55,8 @@ class ComicTranslate(ComicTranslateUI):
     blk_rendered = QtCore.Signal(str, int, object, str)
     render_state_ready = QtCore.Signal(str)
     download_event = QtCore.Signal(str, str)  # status, name
+    # image path, detected source language (English name)
+    page_language_detected = QtCore.Signal(str, str)
 
     def __init__(self, parent=None):
         super(ComicTranslate, self).__init__(parent)
@@ -144,6 +146,7 @@ class ComicTranslate(ComicTranslateUI):
         self.blk_rendered.connect(self.text_ctrl.on_blk_rendered)
         self.render_state_ready.connect(self.image_ctrl.on_render_state_ready)
         self.render_state_ready.connect(self.project_ctrl._on_batch_page_done)
+        self.page_language_detected.connect(self.on_page_language_detected)
         self.download_event.connect(self.on_download_event)
 
         self.connect_ui_elements()
@@ -899,6 +902,22 @@ class ComicTranslate(ComicTranslateUI):
 
         progress = (task_progress + step_progress) * 100 
         self.progress_bar.setValue(int(progress))
+
+    def on_page_language_detected(self, image_path: str, language: str):
+        """Persist a source language the pipeline recognised for one page.
+
+        Runs on the GUI thread (the pipeline emits a signal), so it is safe to
+        touch ``image_states`` and the language combo here.
+        """
+        if not image_path or not language:
+            return
+        changed = self.image_ctrl.apply_detected_source_language(image_path, language)
+        if not changed:
+            return
+        override = self._batch_settings_override
+        if override is not None:
+            override.note_language_detected(image_path, language)
+        self.mark_project_dirty()
 
     def on_download_event(self, status: str, name: str):
         """Show a loading-type MMessage while models/files are being downloaded."""
