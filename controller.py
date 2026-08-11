@@ -37,6 +37,7 @@ from app.controllers.batch_report import BatchReportController
 from app.controllers.manual_workflow import ManualWorkflowController
 from app.controllers.batch_settings import BatchSettingsOverride, BatchSettingsSnapshot
 from app.controllers.glossary import GlossaryStore
+from app.controllers.model_registry_ctrl import ModelRegistryController
 from modules.utils.exceptions import InsufficientCreditsException, ContentFlaggedException
 
 
@@ -135,6 +136,7 @@ class ComicTranslate(ComicTranslateUI):
         self.batch_report_ctrl = BatchReportController(self)
         self.manual_workflow_ctrl = ManualWorkflowController(self)
         self.glossary_store = GlossaryStore(self)
+        self.model_registry_ctrl = ModelRegistryController(self)
         try:
             if self._memlogger is not None:
                 self._memlogger.emit("after_controllers_init")
@@ -214,6 +216,9 @@ class ComicTranslate(ComicTranslateUI):
         self.translate_button.clicked.connect(self.start_batch_process)
         self.cancel_button.clicked.connect(self.cancel_current_task)
         self.batch_report_button.clicked.connect(self.show_latest_batch_report)
+        self.settings_page.ui.model_registry_button.clicked.connect(
+            self.model_registry_ctrl.open_dialog
+        )
         self.set_all_button.clicked.connect(self.text_ctrl.set_src_trg_all)
         self.clear_rectangles_button.clicked.connect(self.image_viewer.clear_rectangles)
         self.clear_brush_strokes_button.clicked.connect(self.image_viewer.clear_brush_strokes)

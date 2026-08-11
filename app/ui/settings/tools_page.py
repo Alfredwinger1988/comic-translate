@@ -2,6 +2,7 @@ from PySide6 import QtWidgets
 from ..dayu_widgets.label import MLabel
 from ..dayu_widgets.check_box import MCheckBox
 from ..dayu_widgets.spin_box import MSpinBox
+from ..dayu_widgets.push_button import MPushButton
 from .utils import create_title_and_combo, set_combo_box_width
 from modules.utils.device import is_gpu_available
 
@@ -128,6 +129,17 @@ class ToolsPage(QtWidgets.QWidget):
         layout.addWidget(detect_page_language_hint)
         layout.addSpacing(10)
         layout.addWidget(ocr_widget)
+
+        self.model_registry_button = MPushButton(
+            self.tr("Model Registry...")
+        ).small()
+        self.model_registry_button.setToolTip(
+            self.tr(
+                "Edit the map between app model names and provider model IDs, "
+                "fetch the newest models from your provider, or validate an API key."
+            )
+        )
+        layout.addWidget(self.model_registry_button)
         layout.addSpacing(10)
         layout.addWidget(inpainting_label)
         layout.addWidget(inpainter_widget)

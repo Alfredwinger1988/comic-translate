@@ -408,6 +408,14 @@ class SettingsPage(QtWidgets.QWidget):
         self._loading_settings = True
         settings = QSettings("ComicLabs", "ComicTranslate")
 
+        # Registry entries must be selectable before the saved selection is
+        # restored, otherwise a model that only exists in the registry would
+        # leave the combo empty after a restart.
+        try:
+            self.ui.refresh_registry_combos()
+        except Exception:
+            pass
+
         # Load language
         language = settings.value('language', 'English')
         translated_language = self.ui.reverse_mappings.get(language, language)
