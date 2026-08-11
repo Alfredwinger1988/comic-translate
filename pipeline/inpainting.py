@@ -9,7 +9,7 @@ from PySide6.QtGui import QColor, QImage, QPainter, QPen, QBrush
 
 from modules.utils.device import resolve_device
 from modules.utils.image_utils import build_block_mask_data, build_bubble_clip_mask, clip_mask_to_bubble, clip_mask_components_to_bubble
-from modules.utils.pipeline_config import inpaint_map, get_config, get_inpainter_backend
+from modules.utils.pipeline_config import inpaint_map, get_config, get_inpainter_backend, resolve_pipeline_settings
 from modules.utils.textblock import adjust_text_line_coordinates
 from pipeline.inpainting_boxes import merge_overlapping_padded_boxes
 from pipeline.webtoon_utils import filter_and_convert_visible_blocks, restore_original_block_coordinates
@@ -46,7 +46,7 @@ class InpaintingHandler:
         self.cached_inpainter_key = None
 
     def _ensure_inpainter(self):
-        settings_page = self.main_page.settings_page
+        settings_page = resolve_pipeline_settings(self.main_page)
         inpainter_key = settings_page.get_tool_selection('inpainter')
         if self.inpainter_cache is None or self.cached_inpainter_key != inpainter_key:
             backend = get_inpainter_backend(inpainter_key)
@@ -61,7 +61,7 @@ class InpaintingHandler:
 
     def manual_inpaint(self):
         image_viewer = self.main_page.image_viewer
-        settings_page = self.main_page.settings_page
+        settings_page = resolve_pipeline_settings(self.main_page)
         mask = image_viewer.get_mask_for_inpainting()
         
         # Handle webtoon mode vs regular mode differently
@@ -904,7 +904,7 @@ class InpaintingHandler:
         mask = self._generate_mask_from_saved_strokes(strokes, image)
         if mask is None:
             return []
-        config = get_config(self.main_page.settings_page)
+        config = get_config(resolve_pipeline_settings(self.main_page))
         inpainted = self.inpaint_image(image, mask, config, blk_list=blk_list or None)
         inpainted = imk.convert_scale_abs(inpainted)
         return self._get_regular_patches(mask, inpainted)

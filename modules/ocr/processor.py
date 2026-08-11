@@ -6,6 +6,7 @@ from modules.utils.language_utils import language_codes, \
     get_lang_code_for_script, get_ocr_bucket_for_script, \
     get_dominant_page_script, is_supported_script, normalize_script
 from .factory import OCRFactory
+from modules.utils.pipeline_config import resolve_pipeline_settings
 _MANGA_OCR_CLASS_NAMES = {"MangaOCRMobileONNXEngine", "MangaOCREngine", "MangaOCREngineONNX"}
 
 
@@ -39,7 +40,7 @@ class OCRProcessor:
             source_lang: The source language for OCR
         """
         self.main_page = main_page
-        self.settings = main_page.settings_page
+        self.settings = resolve_pipeline_settings(main_page)
         self.source_lang = source_lang
         self.source_lang_english = self._get_english_lang(source_lang)
         self.ocr_key = self._get_ocr_key(self.settings.get_tool_selection('ocr'))

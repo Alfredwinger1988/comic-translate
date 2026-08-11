@@ -16,7 +16,7 @@ from PySide6.QtGui import QColor
 from modules.detection.processor import TextBlockDetector
 from modules.translation.processor import Translator
 from modules.utils.textblock import sort_blk_list
-from modules.utils.pipeline_config import get_config
+from modules.utils.pipeline_config import get_config, resolve_pipeline_settings
 from modules.utils.image_utils import generate_mask, get_smart_text_color
 from modules.utils.language_utils import get_language_code, is_no_space_lang
 from modules.utils.translator_utils import get_raw_translation, get_raw_text, format_translations, is_renderable_translation
@@ -104,7 +104,7 @@ class BatchProcessor:
             # index, step, total_steps, change_name
             self.emit_progress(index, total_images, 0, 10, True)
 
-            settings_page = self.main_page.settings_page
+            settings_page = resolve_pipeline_settings(self.main_page)
             source_lang = self.main_page.image_states[image_path]['source_lang']
             target_lang = self.main_page.image_states[image_path]['target_lang']
 

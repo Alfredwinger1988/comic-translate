@@ -2,6 +2,7 @@ import logging
 from modules.ocr.processor import OCRProcessor
 from modules.utils.device import resolve_device
 from modules.utils.language_utils import to_canonical_language_name
+from modules.utils.pipeline_config import resolve_pipeline_settings
 from pipeline.webtoon_utils import filter_and_convert_visible_blocks, restore_original_block_coordinates
 
 logger = logging.getLogger(__name__)
@@ -23,9 +24,9 @@ class OCRHandler:
         )
         if self.main_page.image_viewer.hasPhoto() and self.main_page.image_viewer.rectangles:
             image = self.main_page.image_viewer.get_image_array()
-            ocr_model = self.main_page.settings_page.get_tool_selection('ocr')
+            ocr_model = resolve_pipeline_settings(self.main_page).get_tool_selection('ocr')
             device = resolve_device(
-                self.main_page.settings_page.is_gpu_enabled()
+                resolve_pipeline_settings(self.main_page).is_gpu_enabled()
             )
             cache_key = self.cache_manager._get_ocr_cache_key(image, source_lang, ocr_model, device)
             

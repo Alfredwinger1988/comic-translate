@@ -4,6 +4,7 @@ from ..utils.textblock import TextBlock
 from ..utils.translator_utils import has_translatable_content
 from .base import LLMTranslation
 from .factory import TranslationFactory
+from ..utils.pipeline_config import resolve_pipeline_settings
 
 
 class Translator:
@@ -25,7 +26,7 @@ class Translator:
             target_lang: Target language name (localized)
         """
         self.main_page = main_page
-        self.settings = main_page.settings_page
+        self.settings = resolve_pipeline_settings(main_page)
         
         self.translator_key = self._get_translator_key(self.settings.get_tool_selection('translator'))
         
