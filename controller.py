@@ -1,4 +1,5 @@
 import os
+import logging
 import requests
 import numpy as np
 import shutil
@@ -33,11 +34,14 @@ from app.controllers.shortcuts import ShortcutController
 from app.controllers.task_runner import TaskRunnerController
 from app.controllers.batch_report import BatchReportController
 from app.controllers.manual_workflow import ManualWorkflowController
+from app.controllers.batch_settings import BatchSettingsOverride, BatchSettingsSnapshot
 from modules.utils.exceptions import InsufficientCreditsException, ContentFlaggedException
 
 
 # Ensure any pre-declared mandatory models
 ensure_mandatory_models()
+
+logger = logging.getLogger(__name__)
 
 # Toggle memory logging.
 ENABLE_MEMLOGGER = False
@@ -110,6 +114,11 @@ class ComicTranslate(ComicTranslateUI):
         self.current_worker = None
         self._batch_active = False
         self._batch_cancel_requested = False
+        # Settings the last batch started with, so "Retry this page" can reuse
+        # them instead of whatever Settings holds at retry time.
+        self._batch_settings_snapshot = None
+        self._batch_settings_override = None
+        self._pipeline_settings_proxy = None
 
         self.image_ctrl = ImageStateController(self)
         self.rect_item_ctrl = RectItemController(self)
@@ -250,6 +259,8 @@ class ComicTranslate(ComicTranslateUI):
         self.page_list.insert_browser.sig_files_changed.connect(self.image_ctrl.thread_insert)
         self.page_list.toggle_skip_img.connect(self.image_ctrl.handle_toggle_skip_images)
         self.page_list.translate_imgs.connect(self.batch_translate_selected)
+        self.page_list.retry_imgs.connect(self.retry_batch_pages)
+        self.page_list.export_imgs.connect(self.export_selected_pages)
 
         # New project and safety confirmations
         self.new_project_button.clicked.connect(self._on_new_project_clicked)
@@ -597,18 +608,50 @@ class ComicTranslate(ComicTranslateUI):
             pass
         self._run_batch_for_paths(self.image_files)
 
-    def batch_translate_selected(self, selected_file_names: list[str]):
+    def batch_translate_selected(self, selected_pages: list[str]):
         try:
             if self._memlogger is not None:
                 self._memlogger.emit("batch_start_selected")
         except Exception:
             pass
-        # map base‐name back to full paths
-        selected_paths = [
-            p for p in self.image_files
-            if os.path.basename(p) in selected_file_names
-        ]
-        self._run_batch_for_paths(selected_paths)
+        self._run_batch_for_paths(self._resolve_page_paths(selected_pages))
+
+    def _resolve_page_paths(self, pages: list[str]) -> list[str]:
+        """Accept full paths (preferred) or bare filenames from the page list.
+
+        Rows carry their full path in ``Qt.UserRole``, so full paths are the
+        normal case; the basename fallback keeps older callers working, even
+        though it cannot disambiguate duplicate filenames across chapters.
+        """
+        requested = [p for p in (pages or []) if isinstance(p, str) and p]
+        if not requested:
+            return []
+        exact = set(requested)
+        resolved = [p for p in self.image_files if p in exact]
+        if resolved:
+            return resolved
+        names = {os.path.basename(p) for p in requested}
+        return [p for p in self.image_files if os.path.basename(p) in names]
+
+    def retry_batch_pages(self, pages: list[str]):
+        """Re-run the pipeline for specific pages using the original batch settings."""
+        retry_paths = self._resolve_page_paths(pages)
+        if not retry_paths:
+            return
+        if self._batch_active:
+            MMessage.info(
+                self.tr("Wait for the current batch to finish before retrying a page."),
+                parent=self,
+            )
+            return
+        self._run_batch_for_paths(retry_paths, reuse_last_settings=True)
+
+    def export_selected_pages(self, pages: list[str]):
+        """Render the selected pages into a folder the user picks explicitly."""
+        selected_paths = self._resolve_page_paths(pages)
+        if not selected_paths:
+            return
+        self.project_ctrl.export_pages_to_folder(selected_paths)
 
     def retry_skipped_batch_images(self):
         report = getattr(self.batch_report_ctrl, "_latest_batch_report", None)
@@ -624,7 +667,7 @@ class ComicTranslate(ComicTranslateUI):
         ]
         self._run_batch_for_paths(retry_paths)
 
-    def _run_batch_for_paths(self, batch_paths: list[str]):
+    def _run_batch_for_paths(self, batch_paths: list[str], reuse_last_settings: bool = False):
         unique_paths: list[str] = []
         seen: set[str] = set()
         for path in batch_paths or []:
@@ -638,12 +681,35 @@ class ComicTranslate(ComicTranslateUI):
         if not unique_paths:
             return
 
-        for path in unique_paths:
-            tgt = self.image_states[path]['target_lang']
-            if not validate_settings(self, tgt):
-                return
+        # A retry must use the settings the original batch ran with, not
+        # whatever Settings holds now. Install the snapshot before the target
+        # languages are validated, so validation sees the frozen languages too.
+        if reuse_last_settings and self._batch_settings_snapshot is not None:
+            override = BatchSettingsOverride(self, self._batch_settings_snapshot, unique_paths)
+            override.apply()
+            self._batch_settings_override = override
+
+        try:
+            for path in unique_paths:
+                tgt = self.image_states[path]['target_lang']
+                if not validate_settings(self, tgt):
+                    self._release_batch_settings_override()
+                    return
+        except Exception:
+            self._release_batch_settings_override()
+            raise
+
+        if not reuse_last_settings:
+            # Freeze the settings this run starts with so a later retry of any
+            # of these pages reproduces it.
+            try:
+                self._batch_settings_snapshot = BatchSettingsSnapshot(self, unique_paths)
+            except Exception:
+                self._batch_settings_snapshot = None
+                logger.debug("Could not snapshot batch settings", exc_info=True)
 
         self.image_ctrl.clear_page_skip_errors_for_paths(unique_paths)
+        self.image_ctrl.mark_batch_queued(unique_paths)
         self._start_batch_report(unique_paths)
         self.selected_batch = [] if len(unique_paths) == len(self.image_files) else unique_paths
 
@@ -699,6 +765,8 @@ class ComicTranslate(ComicTranslateUI):
         report = self._finalize_batch_report(was_cancelled)
         self._batch_active = False
         self._batch_cancel_requested = False
+        self.image_ctrl.finalize_batch_statuses(was_cancelled)
+        self._release_batch_settings_override()
         self.progress_bar.setVisible(False)
         self.translate_button.setEnabled(True)
         self.cancel_button.setEnabled(True)
@@ -722,6 +790,19 @@ class ComicTranslate(ComicTranslateUI):
         # Trigger autosave after batch to persist batch report
         if report:
             self.project_ctrl.autosave_project(prefer_project_file=True)
+
+    def active_pipeline_settings(self):
+        """Settings the pipeline must read: frozen snapshot during a retry."""
+        return getattr(self, "_pipeline_settings_proxy", None) or self.settings_page
+
+    def _release_batch_settings_override(self):
+        override = self._batch_settings_override
+        self._batch_settings_override = None
+        if override is not None:
+            try:
+                override.restore()
+            except Exception:
+                logger.debug("Could not restore live settings after retry", exc_info=True)
 
     def disable_hbutton_group(self):
         for button in self.hbutton_group.get_button_group().buttons():
@@ -772,6 +853,9 @@ class ComicTranslate(ComicTranslateUI):
         archive_info_list = self.file_handler.archive_info
         total_archives = len(archive_info_list)
         image_list = self.selected_batch if self.selected_batch else self.image_files
+
+        if index < total_images:
+            self.image_ctrl.mark_batch_progress(index, step, total_steps)
 
         if change_name:
             if index < total_images:
