@@ -286,10 +286,7 @@ class PageListView(QListWidget):
         translate_act.triggered.connect(self.translate_selected_items)
 
         # Only offer a retry for pages the last batch actually failed on.
-        if any(
-            item.data(PAGE_STATUS_ROLE) == STATUS_FAILED
-            for item in selected
-        ):
+        if self._selection_has_failed_page(selected):
             retry_act = menu.addAction(self.tr('Retry this page'))
             retry_act.triggered.connect(self.retry_selected_items)
 
@@ -349,6 +346,12 @@ class PageListView(QListWidget):
         if not selected:
             return
         self.retry_imgs.emit([self._item_identity(item) for item in selected])
+
+    def _selection_has_failed_page(self, selected=None) -> bool:
+        """True when at least one selected row failed in the last batch."""
+        if selected is None:
+            selected = self.selectedItems()
+        return any(item.data(PAGE_STATUS_ROLE) == STATUS_FAILED for item in selected)
 
     def export_selected_items(self):
         selected = self.selectedItems()

@@ -657,6 +657,13 @@ class ComicTranslate(ComicTranslateUI):
                 parent=self,
             )
             return
+        if self._batch_settings_snapshot is None:
+            # Nothing to restore (e.g. the app was restarted since that batch).
+            MMessage.warning(
+                self.tr("The original batch settings are no longer available; "
+                        "retrying with the current settings."),
+                parent=self,
+            )
         self._run_batch_for_paths(retry_paths, reuse_last_settings=True)
 
     def export_selected_pages(self, pages: list[str]):
@@ -678,7 +685,8 @@ class ComicTranslate(ComicTranslateUI):
             if isinstance(entry.get("image_path"), str)
             and entry.get("image_path") in self.image_files
         ]
-        self._run_batch_for_paths(retry_paths)
+        # Same intent as a per-page retry: reproduce the run that skipped them.
+        self._run_batch_for_paths(retry_paths, reuse_last_settings=True)
 
     def _run_batch_for_paths(self, batch_paths: list[str], reuse_last_settings: bool = False):
         unique_paths: list[str] = []
