@@ -305,6 +305,8 @@ class ImageStateController:
         self._page_skip_errors.clear()
         self._suppress_dismiss_message_ids.clear()
         self.main.batch_report_ctrl.clear_latest_batch_report()
+        self.page_status.clear()
+        self._batch_order = []
         self.main.image_files = []
         self.main.image_states.clear()
         self.main.image_data.clear()
