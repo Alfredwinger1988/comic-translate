@@ -911,34 +911,138 @@ class ProjectController:
             for group_index, group in enumerate(export_plan, start=1):
                 group_dir = os.path.join(temp_dir, f"group_{group_index:03d}")
                 os.makedirs(group_dir, exist_ok=True)
-                for page_number, page_idx in enumerate(group["page_indices"], start=1):
-                    file_path = self.main.image_files[page_idx]
-                    
-                    # Try to load the image with error handling
-                    try:
-                        rgb_img = self.main.load_image(file_path)
-                    except Exception as e:
-                        print(f"Warning: Could not load image for page {page_idx} ({file_path}): {e}")
-                        print(f"  Skipping this page in export")
-                        continue
-                    
-                    renderer = ImageSaveRenderer(rgb_img)
-                    viewer_state = all_pages_current_state[file_path]['viewer_state']
-
-                    renderer.apply_patches(self.main.image_patches.get(file_path, []))
-                    if self.main.webtoon_mode and temp_main_page_context is not None:
-                        renderer.add_state_to_image(viewer_state, page_idx, temp_main_page_context)
-                    else:
-                        renderer.add_state_to_image(viewer_state)
-
-                    sv_pth = os.path.join(group_dir, self._build_export_page_name(page_number, file_path))
-                    renderer.save_image(sv_pth)
+                self._render_pages_to_directory(
+                    group["page_indices"],
+                    group_dir,
+                    all_pages_current_state,
+                    temp_main_page_context,
+                )
 
                 os.makedirs(os.path.dirname(group["output_path"]) or ".", exist_ok=True)
                 make(group_dir, group["output_path"])
         finally:
             # Clean up temp directory
             shutil.rmtree(temp_dir)
+
+    def _render_pages_to_directory(
+        self,
+        page_indices: list[int],
+        target_dir: str,
+        all_pages_current_state: dict[str, dict],
+        temp_main_page_context=None,
+    ) -> list[str]:
+        """Render the given pages (patches + text) as images into `target_dir`.
+
+        Shared by archive export and plain-folder export so the render path
+        stays in one place.
+        """
+        written: list[str] = []
+        for page_number, page_idx in enumerate(page_indices, start=1):
+            file_path = self.main.image_files[page_idx]
+
+            # Try to load the image with error handling
+            try:
+                rgb_img = self.main.load_image(file_path)
+            except Exception as e:
+                logger.warning(
+                    "Could not load image for page %s (%s): %s; skipping in export",
+                    page_idx, file_path, e,
+                )
+                continue
+
+            renderer = ImageSaveRenderer(rgb_img)
+            viewer_state = all_pages_current_state[file_path]['viewer_state']
+
+            renderer.apply_patches(self.main.image_patches.get(file_path, []))
+            if self.main.webtoon_mode and temp_main_page_context is not None:
+                renderer.add_state_to_image(viewer_state, page_idx, temp_main_page_context)
+            else:
+                renderer.add_state_to_image(viewer_state)
+
+            sv_pth = os.path.join(target_dir, self._build_export_page_name(page_number, file_path))
+            renderer.save_image(sv_pth)
+            written.append(sv_pth)
+        return written
+
+    # ------------------------------------------------------------------
+    # Export a hand-picked subset of pages into a folder the user chooses
+    # ------------------------------------------------------------------
+    def export_pages_to_folder(self, file_paths: list[str]) -> None:
+        """Render the selected pages as loose images into a user-picked folder."""
+        page_indices = [
+            index for index, path in enumerate(self.main.image_files)
+            if path in set(file_paths or [])
+        ]
+        if not page_indices:
+            return
+
+        # Always ask explicitly; never fall back to the project's default dir.
+        target_dir = QtWidgets.QFileDialog.getExistingDirectory(
+            self.main,
+            self.main.tr("Export Selected Pages To Folder"),
+            self._get_default_export_dir(),
+            QtWidgets.QFileDialog.Option.ShowDirsOnly,
+        )
+        target_dir = str(target_dir or "").strip()
+        if not target_dir:
+            return
+        try:
+            os.makedirs(target_dir, exist_ok=True)
+        except OSError as exc:
+            QtWidgets.QMessageBox.warning(
+                self.main,
+                self.main.tr("Export Folder"),
+                self.main.tr("Could not use the selected export folder.\n\n{error}").format(error=str(exc)),
+            )
+            return
+
+        self.main.image_ctrl.save_current_image_state()
+        all_pages_current_state = self._build_all_pages_current_state()
+        self.main.loading.setVisible(True)
+        if getattr(self.main, "_batch_active", False):
+            # run_threaded is a serial queue, so the export starts once the
+            # running batch is done. Say so instead of looking frozen.
+            MMessage.info(
+                self.main.tr("Export queued; it will start when the current batch finishes."),
+                parent=self.main,
+            )
+        self.main.run_threaded(
+            self._export_pages_to_folder_worker,
+            lambda count: MMessage.success(
+                self.main.tr("Exported {count} page(s).").format(count=count),
+                parent=self.main,
+            ),
+            self.main.default_error_handler,
+            lambda: self.main.loading.setVisible(False),
+            page_indices,
+            target_dir,
+            all_pages_current_state,
+        )
+
+    def _export_pages_to_folder_worker(
+        self,
+        page_indices: list[int],
+        target_dir: str,
+        all_pages_current_state: dict[str, dict],
+    ) -> int:
+        try:
+            selected_paths = [self.main.image_files[i] for i in page_indices]
+            if self.main.file_handler.should_pre_materialize(selected_paths):
+                self.main.file_handler.pre_materialize(selected_paths)
+        except Exception:
+            logger.debug("Export pre-materialization failed; continuing lazily.", exc_info=True)
+
+        temp_main_page_context = None
+        if self.main.webtoon_mode:
+            temp_main_page_context = type('TempMainPage', (object,), {
+                'image_files': self.main.image_files,
+                'image_states': all_pages_current_state,
+            })()
+
+        written = self._render_pages_to_directory(
+            page_indices, target_dir, all_pages_current_state, temp_main_page_context
+        )
+        return len(written)
 
     def _gather_psd_pages(self, all_pages_current_state: dict[str, dict]) -> list[PsdPageData]:
         """Collect PSD page data from the captured viewer state."""
