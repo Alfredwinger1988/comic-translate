@@ -52,10 +52,16 @@ class NavRailMixin:
         self.project_browser_button = MClickBrowserFileToolButton(multiple=False)
         self.project_browser_button.set_dayu_filters([".ctpr"])
 
+        # Pick whole folders of pages instead of shift-selecting every file.
+        self.folder_browser_button = MClickBrowserFolderToolButton(multiple=True)
+
         self.tool_menu = MMenu(parent=self)
 
         image_action = self.tool_menu.addAction(MIcon("ion--image-outline.svg"), self.tr("Images"))
         image_action.triggered.connect(self.image_browser_button.clicked)
+
+        folder_action = self.tool_menu.addAction(MIcon("folder_line.svg"), self.tr("Image Folder"))
+        folder_action.triggered.connect(self.folder_browser_button.clicked)
 
         document_action = self.tool_menu.addAction(MIcon("mingcute--document-line.svg"), self.tr("Document"))
         document_action.triggered.connect(self.document_browser_button.clicked)

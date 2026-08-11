@@ -321,6 +321,23 @@ class MDragFileButton(MToolButton):
         self._path = os.path.join(os.path.expanduser('~'), 'init')
         self._multiple = multiple
         self._filters = []
+        # Opt-in: expand dropped folders into their contained files.
+        self._accept_folders = False
+
+    def get_dayu_accept_folders(self):
+        """
+        Get whether dropped folders are expanded into their files
+        :return: bool
+        """
+        return self._accept_folders
+
+    def set_dayu_accept_folders(self, value):
+        """
+        Set whether dropped folders are expanded into their files
+        :param value: bool
+        :return: None
+        """
+        self._accept_folders = bool(value)
 
     def get_dayu_filters(self):
         """
@@ -421,8 +438,26 @@ class MDragFileButton(MToolButton):
                         file_list.append(file_name)
                 else:
                     file_list.append(file_name)
+            elif os.path.isdir(file_name) and self.get_dayu_accept_folders():
+                file_list.extend(self._expand_folder(file_name))
 
         return file_list
+
+    def _expand_folder(self, folder):
+        """Files inside a dropped folder that pass the filters, in page order."""
+        from modules.utils.archives import natural_sort_key
+
+        filters = self.get_dayu_filters()
+        found = []
+        for root, dirnames, filenames in os.walk(folder):
+            dirnames.sort(key=natural_sort_key)
+            for filename in filenames:
+                if filters and os.path.splitext(filename)[-1].lower() not in filters:
+                    continue
+                full_path = os.path.join(root, filename)
+                found.append((natural_sort_key(os.path.relpath(full_path, folder)), full_path))
+        found.sort(key=lambda item: item[0])
+        return [path for _, path in found]
 
 
 class MClickBrowserFolderPushButton(MPushButton):

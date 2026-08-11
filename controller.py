@@ -20,6 +20,7 @@ from app.ui.commands.box import DeleteBoxesCommand
 
 from modules.utils.textblock import TextBlock
 from modules.utils.file_handler import FileHandler
+from modules.utils.archives import collect_images_in_folders
 from modules.utils.pipeline_config import validate_settings
 from modules.utils.download import mandatory_models, set_download_callback, ensure_mandatory_models
 from pipeline.main_pipeline import ComicTranslatePipeline
@@ -175,6 +176,7 @@ class ComicTranslate(ComicTranslateUI):
         self.document_browser_button.sig_files_changed.connect(self.image_ctrl.thread_load_images)
         self.archive_browser_button.sig_files_changed.connect(self.image_ctrl.thread_load_images)
         self.comic_browser_button.sig_files_changed.connect(self.image_ctrl.thread_load_images)
+        self.folder_browser_button.sig_folders_changed.connect(self.load_image_folders)
         self.project_browser_button.sig_file_changed.connect(self.project_ctrl.thread_load_project)
         self.insert_browser_button.sig_files_changed.connect(self.image_ctrl.thread_insert)
 
@@ -281,6 +283,17 @@ class ComicTranslate(ComicTranslateUI):
             self._on_new_project_clicked()
             return
         if not self._confirm_start_new_project():
+            return
+        self.image_ctrl.thread_load_images(paths)
+
+    def load_image_folders(self, folders: list[str]):
+        """Load every supported image inside the chosen folder(s), in page order."""
+        paths = collect_images_in_folders(folders)
+        if not paths:
+            MMessage.warning(
+                self.tr("No supported images found in the selected folder."),
+                parent=self,
+            )
             return
         self.image_ctrl.thread_load_images(paths)
 

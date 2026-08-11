@@ -133,6 +133,8 @@ class WorkspaceMixin:
         self.drag_browser.setToolTip(
             self.tr("Import Images, PDFs, Epubs or Comic Book Archive Files(cbr, cbz, etc)")
         )
+        # Dropping a folder of pages should work like picking them one by one.
+        self.drag_browser.set_dayu_accept_folders(True)
         self.central_stack.addWidget(self.drag_browser)
         self.central_stack.addWidget(self.image_viewer)
 
