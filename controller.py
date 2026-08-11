@@ -627,6 +627,28 @@ class ComicTranslate(ComicTranslateUI):
             pass
         self._run_batch_for_paths(self.image_files)
 
+    def resume_saved_batch(self):
+        """Re-run the pages a batch was still working on when the app closed.
+
+        The pending queue and the frozen settings of that run are restored from
+        the project file (see ``_restore_batch_queue``); this hands them back
+        to the normal batch runner, so pages that already finished are never
+        re-translated.
+        """
+        if self._batch_active:
+            return
+        pending = list(getattr(self.image_ctrl, "_batch_order", []) or [])
+        pending = [p for p in pending if p in self.image_files]
+        if not pending:
+            return
+        if self._batch_settings_snapshot is None:
+            MMessage.warning(
+                self.tr("The original batch settings could not be restored; "
+                        "resuming with the current settings."),
+                parent=self,
+            )
+        self._run_batch_for_paths(pending, reuse_last_settings=True)
+
     def batch_translate_selected(self, selected_pages: list[str]):
         try:
             if self._memlogger is not None:
@@ -793,6 +815,8 @@ class ComicTranslate(ComicTranslateUI):
         self._batch_active = False
         self._batch_cancel_requested = False
         self.image_ctrl.finalize_batch_statuses(was_cancelled)
+        # A settled batch must not be offered again as "Resume" on the next load.
+        self.image_ctrl.clear_batch_queue_state()
         self._release_batch_settings_override()
         self.progress_bar.setVisible(False)
         self.translate_button.setEnabled(True)

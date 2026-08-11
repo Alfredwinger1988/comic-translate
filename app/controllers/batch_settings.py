@@ -93,6 +93,47 @@ class BatchSettingsSnapshot:
             f"custom_prompt={bool(self.llm_settings.get('custom_system_instructions_enabled'))}"
         )
 
+    # ------------------------------------------------------------------
+    # Serialization (persisted in the project file so a batch can be
+    # resumed after an app restart)
+    # ------------------------------------------------------------------
+    def to_dict(self) -> dict:
+        # Render settings are deliberately omitted: they are global and already
+        # restored from QSettings after a restart, and their Qt.LayoutDirection
+        # enum is awkward to round-trip through the project file. A resumed
+        # batch uses the render settings loaded at startup, exactly like any
+        # other run after a restart.
+        return {
+            "tools": dict(self.tools),
+            "llm_settings": dict(self.llm_settings),
+            "hd_strategy": dict(self.hd_strategy),
+            "export_settings": dict(self.export_settings),
+            "detect_page_language": bool(self.detect_page_language),
+            "languages": {path: list(pair) for path, pair in self.languages.items()},
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "BatchSettingsSnapshot":
+        """Rebuild a snapshot from a serialized dict (missing keys tolerated)."""
+        data = data or {}
+        snapshot = cls.__new__(cls)
+        snapshot.tools = {
+            k: str(v)
+            for k, v in (data.get("tools") or {}).items()
+            if k in TOOL_KEYS and isinstance(v, str)
+        }
+        snapshot.llm_settings = dict(data.get("llm_settings") or {})
+        snapshot.hd_strategy = dict(data.get("hd_strategy") or {})
+        snapshot.export_settings = dict(data.get("export_settings") or {})
+        snapshot.detect_page_language = bool(data.get("detect_page_language", False))
+        snapshot.render_settings = None
+        languages: dict[str, tuple[str, str]] = {}
+        for path, pair in (data.get("languages") or {}).items():
+            if isinstance(path, str) and isinstance(pair, (list, tuple)) and len(pair) == 2:
+                languages[path] = (pair[0], pair[1])
+        snapshot.languages = languages
+        return snapshot
+
 
 class BatchSettingsOverride:
     """Installs a snapshot as the controller's active pipeline settings.

@@ -637,8 +637,51 @@ class ImageStateController:
             elif status == STATUS_QUEUED or (status == STATUS_PROCESSING and was_cancelled):
                 self.set_page_status(path, "")
 
+    def clear_batch_queue_state(self) -> None:
+        """Drop the persisted pending queue after the batch settles.
+
+        Kept separate from ``finalize_batch_statuses`` so a project saved after
+        a finished run does not resurrect the previous batch on the next load.
+        """
+        self._batch_order = []
+
     def get_failed_batch_paths(self) -> List[str]:
         return [p for p in self._batch_order if self.page_status.get(p) == STATUS_FAILED]
+
+    def get_batch_queue_state(self) -> dict:
+        """The batch queue as it stands, for persistence across a restart.
+
+        Only queued/processing/failed pages are kept: pages that already
+        finished (done) should not be re-run after a restart.
+        """
+        kept = [p for p in self._batch_order if self.page_status.get(p) in (STATUS_QUEUED, STATUS_PROCESSING, STATUS_FAILED)]
+        return {"paths": kept, "statuses": {p: self.page_status[p] for p in kept}}
+
+    def restore_batch_queue_state(self, state: dict) -> None:
+        """Rebuild the queue from a persisted dict (missing keys tolerated)."""
+        if not isinstance(state, dict):
+            return
+        paths = [p for p in state.get("paths", []) if isinstance(p, str)]
+        if not paths:
+            return
+        statuses = state.get("statuses") or {}
+        self._batch_order = list(paths)
+        self.page_status = {p: s for p, s in statuses.items() if p in paths and isinstance(s, str)}
+        for path in self._batch_order:
+            self.set_page_status(path, self.page_status.get(path) or STATUS_QUEUED)
+
+    def is_page_finished(self, path: str) -> bool:
+        """Whether a page already has a rendered, translated state.
+
+        Used by "translate only unfinished pages": a page is finished when it
+        holds non-empty text items from a completed render.
+        """
+        state = self.main.image_states.get(path, {})
+        viewer_state = state.get("viewer_state", {}) if isinstance(state, dict) else {}
+        if not isinstance(viewer_state, dict):
+            return False
+        text_items = viewer_state.get("text_items_state")
+        return bool(text_items)
 
     def remove_page_list_rows(self, removed_indices: list[int]):
         """Remove list rows in place to avoid rebuilding the entire sidebar."""

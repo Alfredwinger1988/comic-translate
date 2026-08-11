@@ -12,6 +12,11 @@ import msgpack
 from .parsers import ProjectDecoder, ProjectEncoder, ensure_string_keys
 from modules.utils.file_handler import ensure_prepared_path_materialized
 
+try:
+    from app.controllers.batch_settings import BatchSettingsSnapshot
+except Exception:  # pragma: no cover - import-time safety only
+    BatchSettingsSnapshot = None
+
 if TYPE_CHECKING:
     from controller import ComicTranslate
 
@@ -223,6 +228,71 @@ def ensure_lazy_blob_materialized(path: str) -> bool:
     return True
 
 
+def _serialize_batch_queue(comic_translate: "ComicTranslate") -> dict:
+    """Snapshot of the pending batch queue for the project file.
+
+    Old projects and projects without an in-flight batch store nothing, so the
+    key stays backward compatible.
+    """
+    image_ctrl = getattr(comic_translate, "image_ctrl", None)
+    snapshot = getattr(comic_translate, "_batch_settings_snapshot", None)
+    if image_ctrl is None:
+        return {}
+    try:
+        queue_state = image_ctrl.get_batch_queue_state()
+    except Exception:
+        queue_state = {}
+    result = {"queue": queue_state}
+    if snapshot is not None and hasattr(snapshot, "to_dict"):
+        try:
+            result["settings"] = snapshot.to_dict()
+        except Exception:
+            result["settings"] = None
+    return result
+
+
+def _restore_batch_queue(comic_translate: "ComicTranslate", data: dict, original_to_temp: dict) -> None:
+    """Re-apply a persisted batch queue onto a freshly loaded project.
+
+    Paths are remapped exactly like every other image reference, so a project
+    moved between machines still resumes. Missing/corrupt data is ignored.
+    """
+    if not isinstance(data, dict):
+        return
+    image_ctrl = getattr(comic_translate, "image_ctrl", None)
+    if image_ctrl is None:
+        return
+
+    queue_state = data.get("queue") or {}
+    statuses = queue_state.get("statuses") or {}
+    raw_paths = queue_state.get("paths") or []
+    paths = [original_to_temp.get(p, p) for p in raw_paths if isinstance(p, str)]
+    paths = [p for p in paths if p in comic_translate.image_files]
+    if paths:
+        # Statuses are keyed by the same paths as the queue, so they need the
+        # same remapping.
+        remapped_statuses = {
+            original_to_temp.get(p, p): s
+            for p, s in statuses.items()
+        }
+        image_ctrl.restore_batch_queue_state({"paths": paths, "statuses": remapped_statuses})
+
+    settings_data = data.get("settings")
+    if settings_data and BatchSettingsSnapshot is not None:
+        try:
+            snapshot = BatchSettingsSnapshot.from_dict(settings_data)
+        except Exception:
+            snapshot = None
+        if snapshot is not None:
+            # The snapshot's per-page languages use original paths; remap them
+            # like every other image reference in the project.
+            snapshot.languages = {
+                original_to_temp.get(path, path): pair
+                for path, pair in snapshot.languages.items()
+            }
+            comic_translate._batch_settings_snapshot = snapshot
+
+
 def save_state_to_proj_file_v2(comic_translate: "ComicTranslate", file_name: str) -> None:
     encoder = ProjectEncoder()
 
@@ -400,6 +470,7 @@ def save_state_to_proj_file_v2(comic_translate: "ComicTranslate", file_name: str
             "to_json_blob",
             lambda: "",
         )(),
+        "batch_queue": _serialize_batch_queue(comic_translate),
     }
     manifest_blob = msgpack.packb(manifest, default=encoder.encode, use_bin_type=True)
 
@@ -628,6 +699,8 @@ def _materialize_from_manifest_and_pages(
     glossary_store = getattr(comic_translate, "glossary_store", None)
     if glossary_store is not None:
         glossary_store.from_json_blob(manifest.get("glossary", ""))
+
+    _restore_batch_queue(comic_translate, manifest.get("batch_queue") or {}, original_to_temp)
 
     return manifest.get("llm_extra_context", "")
 

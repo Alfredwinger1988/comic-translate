@@ -1434,6 +1434,26 @@ class ProjectController:
             self.main.default_error_handler
         )
 
+    def _prompt_resume_saved_batch(self) -> None:
+        """Offer to resume the batch that was in flight when this project was saved."""
+        try:
+            queue_state = self.main.image_ctrl.get_batch_queue_state()
+        except Exception:
+            return
+        paths = queue_state.get("paths") or []
+        if not paths:
+            return
+        ret = QtWidgets.QMessageBox.question(
+            self.main,
+            self.main.tr("Resume Batch"),
+            self.main.tr(
+                "This project has {count} page(s) that a previous batch had not finished.\n"
+                "Resume the batch with the saved settings?"
+            ).format(count=len(paths)),
+        )
+        if ret == QtWidgets.QMessageBox.StandardButton.Yes:
+            self.main.resume_saved_batch()
+
     def _display_image_and_set_mode(self, rgb_image, index: int):
         """Display the image and then set the appropriate mode."""
         # First display the image normally
@@ -1446,6 +1466,7 @@ class ProjectController:
             QtCore.QTimer.singleShot(0, self.main.image_viewer.webtoon_manager.restore_view_state)
             QtCore.QTimer.singleShot(150, self.main.image_viewer.webtoon_manager.restore_view_state)
         self.main.set_project_clean()
+        self._prompt_resume_saved_batch()
 
     def _refresh_home_screen(self) -> None:
         """Repopulate the home screen recent list if it is currently visible."""
