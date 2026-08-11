@@ -13,11 +13,11 @@ from typing import TYPE_CHECKING
 
 from PySide6 import QtCore, QtWidgets
 
-from ..dayu_widgets.label import MLabel
-from ..dayu_widgets.line_edit import MLineEdit
-from ..dayu_widgets.push_button import MPushButton
-from ..dayu_widgets.divider import MDivider
-from ..dayu_widgets import dayu_theme
+from .dayu_widgets.label import MLabel
+from .dayu_widgets.line_edit import MLineEdit
+from .dayu_widgets.push_button import MPushButton
+from .dayu_widgets.divider import MDivider
+from .dayu_widgets import dayu_theme
 
 if TYPE_CHECKING:
     from controller import ComicTranslate
