@@ -11,6 +11,9 @@ from ...utils.translator_utils import get_raw_text, set_texts_from_json
 
 class BaseLLMTranslation(LLMTranslation):
     """Base class for LLM-based translation engines with shared functionality."""
+
+    # Separator used when appending user-defined instructions to the base prompt.
+    CUSTOM_INSTRUCTIONS_HEADER = "# Additional Style/Behavior Instructions (User-Defined):"
     
     def __init__(self):
         self.source_lang = None
@@ -22,12 +25,14 @@ class BaseLLMTranslation(LLMTranslation):
         self.temperature = None
         self.top_p = None
         self.max_tokens = None
-        self.timeout = 30  
-    
+        self.timeout = 30
+        self.custom_system_instructions = ""
+        self.custom_system_instructions_enabled = False
+
     def initialize(self, settings: Any, source_lang: str, target_lang: str, **kwargs) -> None:
         """
         Initialize the LLM translation engine.
-        
+
         Args:
             settings: Settings object with credentials
             source_lang: Source language name
@@ -38,10 +43,32 @@ class BaseLLMTranslation(LLMTranslation):
         self.source_lang = source_lang
         self.target_lang = target_lang
         self.img_as_llm_input = llm_settings.get('image_input_enabled', True)
+        # User-defined additions to the system prompt (never replaces the base one).
+        self.custom_system_instructions = llm_settings.get('custom_system_instructions', '') or ""
+        self.custom_system_instructions_enabled = bool(
+            llm_settings.get('custom_system_instructions_enabled', False)
+        )
         self.temperature = 1.0
         self.top_p = 0.95
         self.max_tokens = 5000
-        
+
+    def get_final_system_prompt(self) -> str:
+        """Base system prompt plus the user's custom instructions, when enabled.
+
+        The base prompt from ``get_system_prompt`` is passed through untouched;
+        custom instructions are only ever appended after a clear separator.
+        """
+        base_prompt = self.get_system_prompt(self.source_lang, self.target_lang)
+        if not self.custom_system_instructions_enabled:
+            return base_prompt
+        extra = (self.custom_system_instructions or "").strip()
+        if not extra:
+            return base_prompt
+        return (
+            f"{base_prompt}"
+            f"\n\n{self.CUSTOM_INSTRUCTIONS_HEADER}\n{extra}"
+        )
+
     def translate(self, blk_list: list[TextBlock], image: np.ndarray, extra_context: str) -> list[TextBlock]:
         """
         Translate text blocks using LLM.
@@ -55,7 +82,7 @@ class BaseLLMTranslation(LLMTranslation):
             List of updated TextBlock objects with translations
         """
         entire_raw_text = get_raw_text(blk_list)
-        system_prompt = self.get_system_prompt(self.source_lang, self.target_lang)
+        system_prompt = self.get_final_system_prompt()
         user_prompt = f"{extra_context}\nMake the translation sound as natural as possible.\nTranslate this:\n{entire_raw_text}"
         
         entire_translated_text = self._perform_translation(user_prompt, system_prompt, image)
