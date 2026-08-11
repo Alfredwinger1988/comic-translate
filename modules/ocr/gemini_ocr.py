@@ -3,7 +3,7 @@ import requests
 
 from .base import OCREngine
 from ..utils.textblock import TextBlock, adjust_text_line_coordinates
-from ..utils.translator_utils import MODEL_MAP
+from ..utils.model_registry import get_ocr_model_map
 from app.ui.settings.settings_page import SettingsPage
 
 
@@ -30,7 +30,7 @@ class GeminiOCR(OCREngine):
         self.expansion_percentage = expansion_percentage
         credentials = settings.get_credentials(settings.ui.tr('Google Gemini'))
         self.api_key = credentials.get('api_key', '')
-        self.model = MODEL_MAP.get(model)
+        self.model = get_ocr_model_map().get(model)
         
     def process_image(self, img: np.ndarray, blk_list: list[TextBlock]) -> list[TextBlock]:
         """

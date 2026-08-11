@@ -4,7 +4,7 @@ import json
 
 from .base import OCREngine
 from ..utils.textblock import TextBlock, adjust_text_line_coordinates
-from ..utils.translator_utils import MODEL_MAP
+from ..utils.model_registry import get_ocr_model_map
 
 
 class GPTOCR(OCREngine):
@@ -28,7 +28,7 @@ class GPTOCR(OCREngine):
             expansion_percentage: Percentage to expand text bounding boxes
         """
         self.api_key = api_key
-        self.model = MODEL_MAP.get(model)
+        self.model = get_ocr_model_map().get(model)
         self.expansion_percentage = expansion_percentage
         
     def process_image(self, img: np.ndarray, blk_list: list[TextBlock]) -> list[TextBlock]:

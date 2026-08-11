@@ -84,12 +84,15 @@ class TranslationFactory:
         # First check if it's a traditional translation engine (exact match)
         if translator_key in cls.TRADITIONAL_ENGINES:
             return cls.TRADITIONAL_ENGINES[translator_key]
-        
-        # Otherwise look for matching LLM engine (substring match)
+
+        # Otherwise look for matching LLM engine (substring match). New models
+        # added through the model registry keep working as long as their name
+        # carries the engine identifier (e.g. a registered "Claude-5-Opus"
+        # still routes to ClaudeTranslation).
         for identifier, engine_class in cls.LLM_ENGINE_IDENTIFIERS.items():
             if identifier in translator_key:
                 return engine_class
-        
+
         # Default to LLM engine if no match found
         return cls.DEFAULT_LLM_ENGINE
     

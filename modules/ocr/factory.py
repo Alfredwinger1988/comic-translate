@@ -158,6 +158,16 @@ class OCRFactory:
             'GPT-4.1-mini': lambda s: cls._create_gpt_ocr(s, ocr_model),
             'Gemini-2.5-Flash-Lite': lambda s: cls._create_gemini_ocr(s, ocr_model),
         }
+
+        # Models added through the model registry: route by engine identifier
+        # so a registered "GPT-5" or "Gemini-3-Pro" OCR entry still works
+        # without touching the factory. Anything else keeps the old fallback.
+        if ocr_model not in general:
+            lowered = ocr_model.lower()
+            if "gpt" in lowered:
+                general[ocr_model] = lambda s: cls._create_gpt_ocr(s, ocr_model)
+            elif "gemini" in lowered:
+                general[ocr_model] = lambda s: cls._create_gemini_ocr(s, ocr_model)
         
         make_japanese = lambda s: cls._create_manga_ocr(s, effective_backend)
         make_korean = lambda s: cls._create_ppocr(s, 'ko', effective_backend)

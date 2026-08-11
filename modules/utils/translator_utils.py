@@ -6,17 +6,19 @@ from .textblock import TextBlock
 import imkit as imk
 
 
-MODEL_MAP = {
-    "Custom": "",  
-    "Deepseek": "deepseek-v4-flash", 
-    "GPT-4.1": "gpt-4.1",
-    "GPT-4.1-mini": "gpt-4.1-mini",
-    "Claude-4.6-Sonnet": "claude-sonnet-4-6",
-    "Claude-4.5-Haiku": "claude-haiku-4-5-20251001",
-    "Gemini-2.5-Flash-Lite": "gemini-2.5-flash-lite",
-    "Gemini-3.1-Flash-Lite": "gemini-3.1-flash-lite",
-    "Gemini-2.5-Pro": "gemini-2.5-pro"
-}
+def _live_model_map() -> dict:
+    """LLM map, read through the editable model registry.
+
+    Imported lazily so that ``model_registry`` (which imports nothing from
+    here) can stay a leaf module. The registry keeps the built-in defaults
+    authoritative, so this behaves exactly like the historical hardcoded
+    MODEL_MAP until a user edits the registry file.
+    """
+    from .model_registry import get_llm_model_map
+    return get_llm_model_map()
+
+
+MODEL_MAP = _live_model_map()
 
 def encode_image_array(img_array: np.ndarray):
     img_bytes = imk.encode_image(img_array, ".png")
