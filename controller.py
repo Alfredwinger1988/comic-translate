@@ -625,7 +625,26 @@ class ComicTranslate(ComicTranslateUI):
                 self._memlogger.emit("batch_start_all")
         except Exception:
             pass
-        self._run_batch_for_paths(self.image_files)
+
+        batch_paths = self.image_files
+        if self.skip_finished_checkbox.isChecked():
+            # "Translate All" with the skip option on re-runs only the pages
+            # that do not have a finished translation yet. Pages that were
+            # skipped by the user or failed earlier are still included.
+            finished = [p for p in batch_paths if self.image_ctrl.is_page_finished(p)]
+            pending = [p for p in batch_paths if p not in finished]
+            if finished:
+                MMessage.info(
+                    self.tr("{0} page(s) already have a finished translation "
+                            "and were skipped.").format(len(finished)),
+                    parent=self,
+                    duration=5,
+                )
+            if not pending:
+                return
+            batch_paths = pending
+
+        self._run_batch_for_paths(batch_paths)
 
     def resume_saved_batch(self):
         """Re-run the pages a batch was still working on when the app closed.

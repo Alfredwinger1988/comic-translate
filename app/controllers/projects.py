@@ -1549,6 +1549,9 @@ class ProjectController:
         settings.setValue("brush_size", self.main.image_viewer.brush_size)
         settings.setValue("eraser_size", self.main.image_viewer.eraser_size)
 
+        # Whether "Translate All" should skip pages that already finished.
+        settings.setValue("skip_finished_pages", self.main.skip_finished_checkbox.isChecked())
+
         settings.endGroup()
 
         # Save window state
@@ -1576,6 +1579,11 @@ class ProjectController:
         else:
             self.main.automatic_radio.setChecked(True)
             self.main.batch_mode_selected()
+
+        # Restore the "skip translated pages" preference (default: off, so
+        # existing users keep the exact previous behavior).
+        skip_finished = settings.value("skip_finished_pages", False, type=bool)
+        self.main.skip_finished_checkbox.setChecked(bool(skip_finished))
 
         # Load brush and eraser sizes
         brush_size = int(settings.value("brush_size", 10))  # Default value is 10

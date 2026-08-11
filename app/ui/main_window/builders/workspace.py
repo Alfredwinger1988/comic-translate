@@ -75,6 +75,17 @@ class WorkspaceMixin:
         self.translate_button = MPushButton(self.tr("Translate All"))
         self.translate_button.setEnabled(True)
         self.translate_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+
+        self.skip_finished_checkbox = MCheckBox(self.tr("Skip translated pages"))
+        self.skip_finished_checkbox.setChecked(False)
+        self.skip_finished_checkbox.setToolTip(
+            self.tr(
+                "Do not re-translate pages that already have a finished translation. "
+                "Pages that were skipped or failed are still included."
+            )
+        )
+        self.skip_finished_checkbox.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+
         self.cancel_button = MPushButton(self.tr("Cancel"))
         self.cancel_button.setEnabled(True)
         self.cancel_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
@@ -89,6 +100,7 @@ class WorkspaceMixin:
         header_layout.addWidget(self.manual_radio)
         header_layout.addWidget(self.automatic_radio)
         header_layout.addWidget(self.translate_button)
+        header_layout.addWidget(self.skip_finished_checkbox)
         header_layout.addWidget(self.cancel_button)
         header_layout.addWidget(self.batch_report_button)
 
