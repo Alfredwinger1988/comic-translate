@@ -24,6 +24,30 @@ def get_inpainter_backend(inpainter_key: str) -> str:
     return getattr(inpainter_cls, "preferred_backend", "onnx")
 
 
+def resolve_extra_context(main_page, settings_page):
+    """The extra context for the current translation run.
+
+    The settings page provides the user's global ``extra_context``; the
+    project glossary is merged in on top when the main page carries a
+    glossary store. Using this everywhere a translation request is built means
+    a glossary change automatically invalidates the translation cache (the
+    cache key includes the full context).
+    """
+    if settings_page is None:
+        settings_page = resolve_pipeline_settings(main_page)
+    try:
+        extra_context = settings_page.get_llm_settings().get("extra_context", "")
+    except Exception:
+        extra_context = ""
+    store = getattr(main_page, "glossary_store", None)
+    if store is not None:
+        try:
+            return store.merged_extra_context(extra_context or "")
+        except Exception:
+            return extra_context
+    return extra_context or ""
+
+
 def resolve_pipeline_settings(main_page):
     """Settings object the pipeline should read for the current run.
 

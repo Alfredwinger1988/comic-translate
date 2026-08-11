@@ -36,6 +36,7 @@ from app.controllers.task_runner import TaskRunnerController
 from app.controllers.batch_report import BatchReportController
 from app.controllers.manual_workflow import ManualWorkflowController
 from app.controllers.batch_settings import BatchSettingsOverride, BatchSettingsSnapshot
+from app.controllers.glossary import GlossaryStore
 from modules.utils.exceptions import InsufficientCreditsException, ContentFlaggedException
 
 
@@ -133,6 +134,7 @@ class ComicTranslate(ComicTranslateUI):
         self.task_runner_ctrl = TaskRunnerController(self)
         self.batch_report_ctrl = BatchReportController(self)
         self.manual_workflow_ctrl = ManualWorkflowController(self)
+        self.glossary_store = GlossaryStore(self)
         try:
             if self._memlogger is not None:
                 self._memlogger.emit("after_controllers_init")
@@ -188,6 +190,7 @@ class ComicTranslate(ComicTranslateUI):
         self.save_project_button.clicked.connect(self.project_ctrl.thread_save_project)
         self.save_as_project_button.clicked.connect(self.project_ctrl.thread_save_as_project)
         self.title_bar.project_target_requested.connect(self.project_ctrl.thread_change_project_file)
+        self.project_glossary_action.triggered.connect(self.open_glossary_dialog)
         self.drag_browser.sig_files_changed.connect(self._guarded_thread_load_images)
        
         self.manual_radio.clicked.connect(self.manual_mode_selected)
@@ -902,6 +905,13 @@ class ComicTranslate(ComicTranslateUI):
 
         progress = (task_progress + step_progress) * 100 
         self.progress_bar.setValue(int(progress))
+
+    def open_glossary_dialog(self):
+        """Open the project glossary editor for the current project."""
+        from app.ui.glossary_dialog import GlossaryDialog
+
+        dialog = GlossaryDialog(self, parent=self)
+        dialog.exec_()
 
     def on_page_language_detected(self, image_path: str, language: str):
         """Persist a source language the pipeline recognised for one page.

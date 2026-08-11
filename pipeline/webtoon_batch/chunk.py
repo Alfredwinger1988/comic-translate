@@ -15,7 +15,13 @@ from modules.utils.device import resolve_device
 from modules.utils.exceptions import InsufficientCreditsException
 from modules.utils.language_utils import detect_confident_source_language
 from modules.utils.image_utils import generate_mask
-from modules.utils.pipeline_config import get_config, get_inpainter_backend, inpaint_map, resolve_pipeline_settings
+from modules.utils.pipeline_config import (
+    get_config,
+    get_inpainter_backend,
+    inpaint_map,
+    resolve_extra_context,
+    resolve_pipeline_settings,
+)
 from modules.utils.textblock import TextBlock, sort_blk_list
 from modules.utils.translator_utils import is_renderable_translation
 from pipeline.inpainting import call_inpaint_image
@@ -165,7 +171,7 @@ class ChunkMixin:
     ) -> None:
         if not blocks:
             return
-        extra_context = resolve_pipeline_settings(self.main_page).get_llm_settings()["extra_context"]
+        extra_context = resolve_extra_context(self.main_page, None)
         translator = Translator(self.main_page, source_lang, target_lang)
         try:
             translator.translate(blocks, image, extra_context)

@@ -395,6 +395,11 @@ def save_state_to_proj_file_v2(comic_translate: "ComicTranslate", file_name: str
         "webtoon_mode": comic_translate.webtoon_mode,
         "webtoon_view_state": comic_translate.image_viewer.webtoon_view_state,
         "unique_images": ensure_string_keys(unique_images),
+        "glossary": getattr(
+            getattr(comic_translate, "glossary_store", None),
+            "to_json_blob",
+            lambda: "",
+        )(),
     }
     manifest_blob = msgpack.packb(manifest, default=encoder.encode, use_bin_type=True)
 
@@ -620,6 +625,10 @@ def _materialize_from_manifest_and_pages(
         original_to_temp.get(page, page): plist for page, plist in reconstructed.items()
     }
 
+    glossary_store = getattr(comic_translate, "glossary_store", None)
+    if glossary_store is not None:
+        glossary_store.from_json_blob(manifest.get("glossary", ""))
+
     return manifest.get("llm_extra_context", "")
 
 
@@ -694,6 +703,7 @@ def _load_from_legacy_state_blob(
         "webtoon_mode": state.get("webtoon_mode", False),
         "webtoon_view_state": state.get("webtoon_view_state", {}),
         "unique_images": state.get("unique_images", {}),
+        "glossary": state.get("glossary", ""),
     }
 
     return _materialize_from_manifest_and_pages(comic_translate, file_name, manifest, page_rows)

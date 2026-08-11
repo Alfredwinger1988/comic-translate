@@ -80,6 +80,11 @@ class NavRailMixin:
         psd_action = self.tool_menu.addAction(MIcon("psd-file.svg"), self.tr("PSD"))
         psd_action.triggered.connect(self.psd_browser_button.clicked)
 
+        self.tool_menu.addSeparator()
+        self.project_glossary_action = self.tool_menu.addAction(
+            MIcon("mingcute--book-line.svg"), self.tr("Project Glossary...")
+        )
+
         self.save_browser = MClickSaveFileToolButton()
         save_file_types = [("Images", ["png", "jpg", "jpeg", "webp", "bmp"])]
         self.save_browser.set_file_types(save_file_types)

@@ -16,7 +16,7 @@ from PySide6.QtGui import QColor
 from modules.detection.processor import TextBlockDetector
 from modules.translation.processor import Translator
 from modules.utils.textblock import sort_blk_list
-from modules.utils.pipeline_config import get_config, resolve_pipeline_settings
+from modules.utils.pipeline_config import get_config, resolve_extra_context, resolve_pipeline_settings
 from modules.utils.image_utils import generate_mask, get_smart_text_color
 from modules.utils.language_utils import get_language_code, is_no_space_lang, detect_confident_source_language
 from modules.utils.translator_utils import get_raw_translation, get_raw_text, format_translations, is_renderable_translation
@@ -229,7 +229,7 @@ class BatchProcessor:
                 return
 
             # Get Translations/ Export if selected
-            extra_context = settings_page.get_llm_settings()['extra_context']
+            extra_context = resolve_extra_context(self.main_page, settings_page)
             translator_key = settings_page.get_tool_selection('translator')
             translator = Translator(self.main_page, source_lang, target_lang)
             
