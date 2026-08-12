@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any, Sequence
 
 from PySide6 import QtCore
 
-from modules.detection.processor import TextBlockDetector
+from modules.detection.processor import TextBlockDetector
 from modules.ocr.processor import OCRProcessor
 from modules.rendering.render import pyside_word_wrap, is_vertical_block, get_best_render_area
 from modules.translation.processor import Translator
@@ -12,7 +12,7 @@ from modules.utils.common_utils import is_close
 from modules.utils.device import resolve_device
 from modules.utils.language_utils import get_language_code, is_no_space_lang
 from modules.utils.language_utils import to_canonical_language_name
-from modules.utils.pipeline_config import validate_ocr, validate_translator
+from modules.utils.pipeline_config import validate_ocr, validate_translator, resolve_extra_context
 from modules.utils.textblock import sort_blk_list
 from modules.utils.translator_utils import is_there_text, format_translations, set_upper_case
 from pipeline.webtoon_utils import get_visible_text_items, get_first_visible_block
@@ -348,7 +348,7 @@ class ManualWorkflowController:
                 self.main.lang_mapping,
             )
             settings_page = self.main.settings_page
-            extra_context = settings_page.get_llm_settings()["extra_context"]
+            extra_context = resolve_extra_context(self.main, settings_page)
             translator_key = settings_page.get_tool_selection("translator")
             upper_case = settings_page.ui.uppercase_checkbox.isChecked()
 

@@ -68,6 +68,33 @@ def is_image_file(filename):
     return filename.lower().endswith(_IMAGE_EXTENSIONS)
 
 
+def collect_images_in_folders(folders) -> list:
+    """Every supported image under the given folders, in reading order.
+
+    Walks subfolders so a chapter tree can be imported in one go, and sorts
+    naturally (page2 before page10) by relative path, keeping chapters grouped.
+    """
+    collected: list = []
+    seen = set()
+    for folder in folders or []:
+        if not isinstance(folder, str) or not os.path.isdir(folder):
+            continue
+        found: list = []
+        for root, dirnames, filenames in os.walk(folder):
+            dirnames.sort(key=natural_sort_key)
+            for filename in filenames:
+                if not is_image_file(filename):
+                    continue
+                full_path = os.path.join(root, filename)
+                found.append((natural_sort_key(os.path.relpath(full_path, folder)), full_path))
+        found.sort(key=lambda item: item[0])
+        for _, full_path in found:
+            if full_path not in seen:
+                seen.add(full_path)
+                collected.append(full_path)
+    return collected
+
+
 def _safe_ext(path: str, default: str = ".png") -> str:
     ext = os.path.splitext(os.path.basename(path))[1].lower()
     if ext in _IMAGE_EXTENSIONS:

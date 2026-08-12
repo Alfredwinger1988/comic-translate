@@ -2,6 +2,7 @@ from typing import Any
 
 from .base import TraditionalTranslation
 from ..utils.textblock import TextBlock
+from ..utils.retry import with_retry
 
 
 class DeepLTranslation(TraditionalTranslation):
@@ -29,6 +30,7 @@ class DeepLTranslation(TraditionalTranslation):
         credentials = settings.get_credentials(settings.ui.tr("DeepL"))
         self.api_key = credentials.get('api_key', '')
         self.translator = deepl.Translator(self.api_key)
+        self._settings_ref = settings
         
     def translate(self, blk_list: list[TextBlock]) -> list[TextBlock]:
         for blk in blk_list:
@@ -37,13 +39,17 @@ class DeepLTranslation(TraditionalTranslation):
             if not text.strip():
                 blk.translation = ''
                 continue
-            
-            result = self.translator.translate_text(
-                text, 
-                source_lang=self.source_lang_code, 
-                target_lang=self.target_lang_code
+
+            result = with_retry(
+                lambda: self.translator.translate_text(
+                    text,
+                    source_lang=self.source_lang_code,
+                    target_lang=self.target_lang_code,
+                ),
+                getattr(self, "_settings_ref", None),
+                label="DeepL",
             )
-            
+
             blk.translation = result.text
             
         return blk_list 

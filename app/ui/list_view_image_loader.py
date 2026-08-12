@@ -320,14 +320,25 @@ class ListViewImageLoader(QObject):
             self._queue_image_load(index)
             
     def shutdown(self):
-        """Shutdown the loader and clean up resources."""
-        if self.worker:
-            self.stop_worker_requested.emit()
-            
+        """Shutdown the loader and clean up resources.
+
+        The worker's ``stop`` slot is normally reached through a queued signal,
+        but on shutdown the event loop may quit before that queued call runs.
+        Set ``should_stop`` directly (thread-safe: it is only read from the
+        worker thread and we want it set before ``quit()``), then wait for the
+        thread to finish. Idempotent: repeated calls are safe.
+        """
+        if getattr(self, "_shutdown_done", False):
+            return
+        self._shutdown_done = True
+        worker = self.worker
+        if worker is not None:
+            worker.should_stop = True
+            worker.load_queue.clear()
+            worker._queued_indices.clear()
         if self.worker_thread.isRunning():
             self.worker_thread.quit()
-            self.worker_thread.wait(5000)  # Wait up to 5 seconds
-            
+            self.worker_thread.wait(10000)  # wait up to 10 s
         self.clear()
 
     @staticmethod

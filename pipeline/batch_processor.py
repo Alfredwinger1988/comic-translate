@@ -16,9 +16,9 @@ from PySide6.QtGui import QColor
 from modules.detection.processor import TextBlockDetector
 from modules.translation.processor import Translator
 from modules.utils.textblock import sort_blk_list
-from modules.utils.pipeline_config import get_config
+from modules.utils.pipeline_config import get_config, resolve_extra_context, resolve_pipeline_settings
 from modules.utils.image_utils import generate_mask, get_smart_text_color
-from modules.utils.language_utils import get_language_code, is_no_space_lang
+from modules.utils.language_utils import get_language_code, is_no_space_lang, detect_confident_source_language
 from modules.utils.translator_utils import get_raw_translation, get_raw_text, format_translations, is_renderable_translation
 from modules.rendering.render import get_best_render_area, pyside_word_wrap, is_vertical_block
 from modules.utils.device import resolve_device
@@ -84,6 +84,23 @@ class BatchProcessor:
         worker = getattr(self.main_page, "current_worker", None)
         return bool(worker and worker.is_cancelled)
 
+    def _detect_page_source_language(self, settings_page, source_lang: str, blk_list) -> str:
+        """Concrete language for an "Auto" page, or "" to leave it on "Auto".
+
+        Opt-in (Settings → Tools). Uses the script annotations the detector has
+        already put on the blocks, so it costs nothing extra and needs no
+        network. Mixed or Latin-script pages deliberately stay "Auto".
+        """
+        if source_lang != 'Auto' or not blk_list:
+            return ""
+        try:
+            if not settings_page.is_page_language_detection_enabled():
+                return ""
+        except AttributeError:
+            # Stand-in settings objects used by tests/tools.
+            return ""
+        return detect_confident_source_language(blk_list)
+
     def batch_process(self, selected_paths: List[str] = None):
         timestamp = datetime.now().strftime("%b-%d-%Y_%I-%M-%S%p")
         image_list = selected_paths if selected_paths is not None else self.main_page.image_files
@@ -104,7 +121,7 @@ class BatchProcessor:
             # index, step, total_steps, change_name
             self.emit_progress(index, total_images, 0, 10, True)
 
-            settings_page = self.main_page.settings_page
+            settings_page = resolve_pipeline_settings(self.main_page)
             source_lang = self.main_page.image_states[image_path]['source_lang']
             target_lang = self.main_page.image_states[image_path]['target_lang']
 
@@ -150,6 +167,12 @@ class BatchProcessor:
                 return
 
             self.block_detection.annotate_language_if_auto(image, blk_list, source_lang)
+
+            detected_lang = self._detect_page_source_language(settings_page, source_lang, blk_list)
+            if detected_lang:
+                logger.info("Detected source language %s for %s", detected_lang, image_path)
+                source_lang = detected_lang
+                self.main_page.page_language_detected.emit(image_path, detected_lang)
 
             if blk_list:
                 # Get ocr cache key for batch processing
@@ -206,7 +229,7 @@ class BatchProcessor:
                 return
 
             # Get Translations/ Export if selected
-            extra_context = settings_page.get_llm_settings()['extra_context']
+            extra_context = resolve_extra_context(self.main_page, settings_page)
             translator_key = settings_page.get_tool_selection('translator')
             translator = Translator(self.main_page, source_lang, target_lang)
             

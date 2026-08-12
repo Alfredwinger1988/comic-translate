@@ -1,4 +1,5 @@
 import os
+import logging
 import requests
 import numpy as np
 import shutil
@@ -19,6 +20,7 @@ from app.ui.commands.box import DeleteBoxesCommand
 
 from modules.utils.textblock import TextBlock
 from modules.utils.file_handler import FileHandler
+from modules.utils.archives import collect_images_in_folders
 from modules.utils.pipeline_config import validate_settings
 from modules.utils.download import mandatory_models, set_download_callback, ensure_mandatory_models
 from pipeline.main_pipeline import ComicTranslatePipeline
@@ -33,11 +35,16 @@ from app.controllers.shortcuts import ShortcutController
 from app.controllers.task_runner import TaskRunnerController
 from app.controllers.batch_report import BatchReportController
 from app.controllers.manual_workflow import ManualWorkflowController
+from app.controllers.batch_settings import BatchSettingsOverride, BatchSettingsSnapshot
+from app.controllers.glossary import GlossaryStore
+from app.controllers.model_registry_ctrl import ModelRegistryController
 from modules.utils.exceptions import InsufficientCreditsException, ContentFlaggedException
 
 
 # Ensure any pre-declared mandatory models
 ensure_mandatory_models()
+
+logger = logging.getLogger(__name__)
 
 # Toggle memory logging.
 ENABLE_MEMLOGGER = False
@@ -50,6 +57,8 @@ class ComicTranslate(ComicTranslateUI):
     blk_rendered = QtCore.Signal(str, int, object, str)
     render_state_ready = QtCore.Signal(str)
     download_event = QtCore.Signal(str, str)  # status, name
+    # image path, detected source language (English name)
+    page_language_detected = QtCore.Signal(str, str)
 
     def __init__(self, parent=None):
         super(ComicTranslate, self).__init__(parent)
@@ -110,6 +119,11 @@ class ComicTranslate(ComicTranslateUI):
         self.current_worker = None
         self._batch_active = False
         self._batch_cancel_requested = False
+        # Settings the last batch started with, so "Retry this page" can reuse
+        # them instead of whatever Settings holds at retry time.
+        self._batch_settings_snapshot = None
+        self._batch_settings_override = None
+        self._pipeline_settings_proxy = None
 
         self.image_ctrl = ImageStateController(self)
         self.rect_item_ctrl = RectItemController(self)
@@ -121,6 +135,8 @@ class ComicTranslate(ComicTranslateUI):
         self.task_runner_ctrl = TaskRunnerController(self)
         self.batch_report_ctrl = BatchReportController(self)
         self.manual_workflow_ctrl = ManualWorkflowController(self)
+        self.glossary_store = GlossaryStore(self)
+        self.model_registry_ctrl = ModelRegistryController(self)
         try:
             if self._memlogger is not None:
                 self._memlogger.emit("after_controllers_init")
@@ -134,6 +150,7 @@ class ComicTranslate(ComicTranslateUI):
         self.blk_rendered.connect(self.text_ctrl.on_blk_rendered)
         self.render_state_ready.connect(self.image_ctrl.on_render_state_ready)
         self.render_state_ready.connect(self.project_ctrl._on_batch_page_done)
+        self.page_language_detected.connect(self.on_page_language_detected)
         self.download_event.connect(self.on_download_event)
 
         self.connect_ui_elements()
@@ -166,6 +183,7 @@ class ComicTranslate(ComicTranslateUI):
         self.document_browser_button.sig_files_changed.connect(self.image_ctrl.thread_load_images)
         self.archive_browser_button.sig_files_changed.connect(self.image_ctrl.thread_load_images)
         self.comic_browser_button.sig_files_changed.connect(self.image_ctrl.thread_load_images)
+        self.folder_browser_button.sig_folders_changed.connect(self.load_image_folders)
         self.project_browser_button.sig_file_changed.connect(self.project_ctrl.thread_load_project)
         self.insert_browser_button.sig_files_changed.connect(self.image_ctrl.thread_insert)
 
@@ -174,6 +192,7 @@ class ComicTranslate(ComicTranslateUI):
         self.save_project_button.clicked.connect(self.project_ctrl.thread_save_project)
         self.save_as_project_button.clicked.connect(self.project_ctrl.thread_save_as_project)
         self.title_bar.project_target_requested.connect(self.project_ctrl.thread_change_project_file)
+        self.project_glossary_action.triggered.connect(self.open_glossary_dialog)
         self.drag_browser.sig_files_changed.connect(self._guarded_thread_load_images)
        
         self.manual_radio.clicked.connect(self.manual_mode_selected)
@@ -197,6 +216,9 @@ class ComicTranslate(ComicTranslateUI):
         self.translate_button.clicked.connect(self.start_batch_process)
         self.cancel_button.clicked.connect(self.cancel_current_task)
         self.batch_report_button.clicked.connect(self.show_latest_batch_report)
+        self.settings_page.ui.model_registry_button.clicked.connect(
+            self.model_registry_ctrl.open_dialog
+        )
         self.set_all_button.clicked.connect(self.text_ctrl.set_src_trg_all)
         self.clear_rectangles_button.clicked.connect(self.image_viewer.clear_rectangles)
         self.clear_brush_strokes_button.clicked.connect(self.image_viewer.clear_brush_strokes)
@@ -250,6 +272,8 @@ class ComicTranslate(ComicTranslateUI):
         self.page_list.insert_browser.sig_files_changed.connect(self.image_ctrl.thread_insert)
         self.page_list.toggle_skip_img.connect(self.image_ctrl.handle_toggle_skip_images)
         self.page_list.translate_imgs.connect(self.batch_translate_selected)
+        self.page_list.retry_imgs.connect(self.retry_batch_pages)
+        self.page_list.export_imgs.connect(self.export_selected_pages)
 
         # New project and safety confirmations
         self.new_project_button.clicked.connect(self._on_new_project_clicked)
@@ -270,6 +294,17 @@ class ComicTranslate(ComicTranslateUI):
             self._on_new_project_clicked()
             return
         if not self._confirm_start_new_project():
+            return
+        self.image_ctrl.thread_load_images(paths)
+
+    def load_image_folders(self, folders: list[str]):
+        """Load every supported image inside the chosen folder(s), in page order."""
+        paths = collect_images_in_folders(folders)
+        if not paths:
+            MMessage.warning(
+                self.tr("No supported images found in the selected folder."),
+                parent=self,
+            )
             return
         self.image_ctrl.thread_load_images(paths)
 
@@ -595,20 +630,100 @@ class ComicTranslate(ComicTranslateUI):
                 self._memlogger.emit("batch_start_all")
         except Exception:
             pass
-        self._run_batch_for_paths(self.image_files)
 
-    def batch_translate_selected(self, selected_file_names: list[str]):
+        batch_paths = self.image_files
+        if self.skip_finished_checkbox.isChecked():
+            # "Translate All" with the skip option on re-runs only the pages
+            # that do not have a finished translation yet. Pages that were
+            # skipped by the user or failed earlier are still included.
+            finished = [p for p in batch_paths if self.image_ctrl.is_page_finished(p)]
+            pending = [p for p in batch_paths if p not in finished]
+            if finished:
+                MMessage.info(
+                    self.tr("{0} page(s) already have a finished translation "
+                            "and were skipped.").format(len(finished)),
+                    parent=self,
+                    duration=5,
+                )
+            if not pending:
+                return
+            batch_paths = pending
+
+        self._run_batch_for_paths(batch_paths)
+
+    def resume_saved_batch(self):
+        """Re-run the pages a batch was still working on when the app closed.
+
+        The pending queue and the frozen settings of that run are restored from
+        the project file (see ``_restore_batch_queue``); this hands them back
+        to the normal batch runner, so pages that already finished are never
+        re-translated.
+        """
+        if self._batch_active:
+            return
+        pending = list(getattr(self.image_ctrl, "_batch_order", []) or [])
+        pending = [p for p in pending if p in self.image_files]
+        if not pending:
+            return
+        if self._batch_settings_snapshot is None:
+            MMessage.warning(
+                self.tr("The original batch settings could not be restored; "
+                        "resuming with the current settings."),
+                parent=self,
+            )
+        self._run_batch_for_paths(pending, reuse_last_settings=True)
+
+    def batch_translate_selected(self, selected_pages: list[str]):
         try:
             if self._memlogger is not None:
                 self._memlogger.emit("batch_start_selected")
         except Exception:
             pass
-        # map base‐name back to full paths
-        selected_paths = [
-            p for p in self.image_files
-            if os.path.basename(p) in selected_file_names
-        ]
-        self._run_batch_for_paths(selected_paths)
+        self._run_batch_for_paths(self._resolve_page_paths(selected_pages))
+
+    def _resolve_page_paths(self, pages: list[str]) -> list[str]:
+        """Accept full paths (preferred) or bare filenames from the page list.
+
+        Rows carry their full path in ``Qt.UserRole``, so full paths are the
+        normal case; the basename fallback keeps older callers working, even
+        though it cannot disambiguate duplicate filenames across chapters.
+        """
+        requested = [p for p in (pages or []) if isinstance(p, str) and p]
+        if not requested:
+            return []
+        exact = set(requested)
+        resolved = [p for p in self.image_files if p in exact]
+        if resolved:
+            return resolved
+        names = {os.path.basename(p) for p in requested}
+        return [p for p in self.image_files if os.path.basename(p) in names]
+
+    def retry_batch_pages(self, pages: list[str]):
+        """Re-run the pipeline for specific pages using the original batch settings."""
+        retry_paths = self._resolve_page_paths(pages)
+        if not retry_paths:
+            return
+        if self._batch_active:
+            MMessage.info(
+                self.tr("Wait for the current batch to finish before retrying a page."),
+                parent=self,
+            )
+            return
+        if self._batch_settings_snapshot is None:
+            # Nothing to restore (e.g. the app was restarted since that batch).
+            MMessage.warning(
+                self.tr("The original batch settings are no longer available; "
+                        "retrying with the current settings."),
+                parent=self,
+            )
+        self._run_batch_for_paths(retry_paths, reuse_last_settings=True)
+
+    def export_selected_pages(self, pages: list[str]):
+        """Render the selected pages into a folder the user picks explicitly."""
+        selected_paths = self._resolve_page_paths(pages)
+        if not selected_paths:
+            return
+        self.project_ctrl.export_pages_to_folder(selected_paths)
 
     def retry_skipped_batch_images(self):
         report = getattr(self.batch_report_ctrl, "_latest_batch_report", None)
@@ -622,9 +737,10 @@ class ComicTranslate(ComicTranslateUI):
             if isinstance(entry.get("image_path"), str)
             and entry.get("image_path") in self.image_files
         ]
-        self._run_batch_for_paths(retry_paths)
+        # Same intent as a per-page retry: reproduce the run that skipped them.
+        self._run_batch_for_paths(retry_paths, reuse_last_settings=True)
 
-    def _run_batch_for_paths(self, batch_paths: list[str]):
+    def _run_batch_for_paths(self, batch_paths: list[str], reuse_last_settings: bool = False):
         unique_paths: list[str] = []
         seen: set[str] = set()
         for path in batch_paths or []:
@@ -638,12 +754,35 @@ class ComicTranslate(ComicTranslateUI):
         if not unique_paths:
             return
 
-        for path in unique_paths:
-            tgt = self.image_states[path]['target_lang']
-            if not validate_settings(self, tgt):
-                return
+        # A retry must use the settings the original batch ran with, not
+        # whatever Settings holds now. Install the snapshot before the target
+        # languages are validated, so validation sees the frozen languages too.
+        if reuse_last_settings and self._batch_settings_snapshot is not None:
+            override = BatchSettingsOverride(self, self._batch_settings_snapshot, unique_paths)
+            override.apply()
+            self._batch_settings_override = override
+
+        try:
+            for path in unique_paths:
+                tgt = self.image_states[path]['target_lang']
+                if not validate_settings(self, tgt):
+                    self._release_batch_settings_override()
+                    return
+        except Exception:
+            self._release_batch_settings_override()
+            raise
+
+        if not reuse_last_settings:
+            # Freeze the settings this run starts with so a later retry of any
+            # of these pages reproduces it.
+            try:
+                self._batch_settings_snapshot = BatchSettingsSnapshot(self, unique_paths)
+            except Exception:
+                self._batch_settings_snapshot = None
+                logger.debug("Could not snapshot batch settings", exc_info=True)
 
         self.image_ctrl.clear_page_skip_errors_for_paths(unique_paths)
+        self.image_ctrl.mark_batch_queued(unique_paths)
         self._start_batch_report(unique_paths)
         self.selected_batch = [] if len(unique_paths) == len(self.image_files) else unique_paths
 
@@ -699,6 +838,10 @@ class ComicTranslate(ComicTranslateUI):
         report = self._finalize_batch_report(was_cancelled)
         self._batch_active = False
         self._batch_cancel_requested = False
+        self.image_ctrl.finalize_batch_statuses(was_cancelled)
+        # A settled batch must not be offered again as "Resume" on the next load.
+        self.image_ctrl.clear_batch_queue_state()
+        self._release_batch_settings_override()
         self.progress_bar.setVisible(False)
         self.translate_button.setEnabled(True)
         self.cancel_button.setEnabled(True)
@@ -722,6 +865,19 @@ class ComicTranslate(ComicTranslateUI):
         # Trigger autosave after batch to persist batch report
         if report:
             self.project_ctrl.autosave_project(prefer_project_file=True)
+
+    def active_pipeline_settings(self):
+        """Settings the pipeline must read: frozen snapshot during a retry."""
+        return getattr(self, "_pipeline_settings_proxy", None) or self.settings_page
+
+    def _release_batch_settings_override(self):
+        override = self._batch_settings_override
+        self._batch_settings_override = None
+        if override is not None:
+            try:
+                override.restore()
+            except Exception:
+                logger.debug("Could not restore live settings after retry", exc_info=True)
 
     def disable_hbutton_group(self):
         for button in self.hbutton_group.get_button_group().buttons():
@@ -773,6 +929,9 @@ class ComicTranslate(ComicTranslateUI):
         total_archives = len(archive_info_list)
         image_list = self.selected_batch if self.selected_batch else self.image_files
 
+        if index < total_images:
+            self.image_ctrl.mark_batch_progress(index, step, total_steps)
+
         if change_name:
             if index < total_images:
                 im_path = image_list[index]
@@ -794,6 +953,29 @@ class ComicTranslate(ComicTranslateUI):
 
         progress = (task_progress + step_progress) * 100 
         self.progress_bar.setValue(int(progress))
+
+    def open_glossary_dialog(self):
+        """Open the project glossary editor for the current project."""
+        from app.ui.glossary_dialog import GlossaryDialog
+
+        dialog = GlossaryDialog(self, parent=self)
+        dialog.exec_()
+
+    def on_page_language_detected(self, image_path: str, language: str):
+        """Persist a source language the pipeline recognised for one page.
+
+        Runs on the GUI thread (the pipeline emits a signal), so it is safe to
+        touch ``image_states`` and the language combo here.
+        """
+        if not image_path or not language:
+            return
+        changed = self.image_ctrl.apply_detected_source_language(image_path, language)
+        if not changed:
+            return
+        override = self._batch_settings_override
+        if override is not None:
+            override.note_language_detected(image_path, language)
+        self.mark_project_dirty()
 
     def on_download_event(self, status: str, name: str):
         """Show a loading-type MMessage while models/files are being downloaded."""

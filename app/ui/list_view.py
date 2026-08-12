@@ -1,10 +1,22 @@
 from PySide6.QtWidgets import QListWidget
 from PySide6.QtWidgets import QSizePolicy, QAbstractItemView, QStyledItemDelegate, QStyle
-from PySide6.QtCore import Signal, Qt, QSize, QRect, QEvent
+from PySide6.QtCore import Signal, Qt, QSize, QRect, QEvent, QCoreApplication
 from PySide6.QtGui import QContextMenuEvent, QDropEvent, QPainter, QPixmap, QFont, QColor
 from .dayu_widgets import dayu_theme
 from .dayu_widgets.menu import MMenu
 from .dayu_widgets.browser import MClickBrowserFilePushButton
+
+
+# Batch status of a page, stored on the item so the delegate can paint it
+# without keeping a parallel widget per row.
+PAGE_STATUS_ROLE = Qt.ItemDataRole.UserRole + 1
+# Fraction (0.0-1.0) of the pipeline finished for the page being processed.
+PAGE_PROGRESS_ROLE = Qt.ItemDataRole.UserRole + 2
+
+STATUS_QUEUED = "queued"
+STATUS_PROCESSING = "processing"
+STATUS_DONE = "done"
+STATUS_FAILED = "failed"
 
 
 class PageListItemDelegate(QStyledItemDelegate):
@@ -14,6 +26,7 @@ class PageListItemDelegate(QStyledItemDelegate):
     ROW_HEIGHT = 60
     MARGIN_X = 8
     GAP = 10
+    BAR_HEIGHT = 3
 
     def paint(self, painter: QPainter, option, index):
         painter.save()
@@ -52,21 +65,89 @@ class PageListItemDelegate(QStyledItemDelegate):
         font.setStrikeOut(False)
         painter.setFont(font)
 
+        status = index.data(PAGE_STATUS_ROLE) or ""
+        # With a status to show, the filename moves up to free a line for it.
+        name_rect = text_rect
+        if status:
+            name_rect = QRect(
+                text_rect.x(),
+                text_rect.y(),
+                text_rect.width(),
+                text_rect.height() // 2,
+            )
+
         text = index.data(Qt.ItemDataRole.DisplayRole) or ""
         metrics = painter.fontMetrics()
-        text = metrics.elidedText(str(text), Qt.TextElideMode.ElideMiddle, text_rect.width())
+        text = metrics.elidedText(str(text), Qt.TextElideMode.ElideMiddle, name_rect.width())
 
         pen_color = option.palette.highlightedText().color() if selected else option.palette.text().color()
         if strike_out and not selected:
             pen_color = option.palette.mid().color()
         painter.setPen(pen_color)
-        painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
+        alignment = Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
+        painter.drawText(name_rect, alignment, text)
 
         if strike_out:
-            line_y = text_rect.center().y()
-            painter.drawLine(text_rect.left(), line_y, text_rect.left() + metrics.horizontalAdvance(text), line_y)
+            line_y = name_rect.center().y()
+            painter.drawLine(name_rect.left(), line_y, name_rect.left() + metrics.horizontalAdvance(text), line_y)
+
+        if status:
+            self._paint_status(painter, text_rect, status, index)
 
         painter.restore()
+
+    def _paint_status(self, painter: QPainter, text_rect: QRect, status: str, index) -> None:
+        label, color = self._status_label_and_color(status)
+        status_rect = QRect(
+            text_rect.x(),
+            text_rect.center().y(),
+            text_rect.width(),
+            text_rect.height() // 2 - self.BAR_HEIGHT - 2,
+        )
+
+        painter.save()
+        small_font = QFont(painter.font())
+        small_font.setPointSizeF(max(6.0, small_font.pointSizeF() - 1.5))
+        painter.setFont(small_font)
+        painter.setPen(color)
+        painter.drawText(
+            status_rect,
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+            label,
+        )
+        painter.restore()
+
+        # Progress bar only while the page is actually being worked on.
+        if status != STATUS_PROCESSING:
+            return
+        progress = index.data(PAGE_PROGRESS_ROLE)
+        fraction = float(progress) if isinstance(progress, (int, float)) else 0.0
+        fraction = max(0.0, min(1.0, fraction))
+        bar_rect = QRect(
+            text_rect.x(),
+            status_rect.bottom() + 2,
+            text_rect.width(),
+            self.BAR_HEIGHT,
+        )
+        track = QColor(color)
+        track.setAlpha(60)
+        painter.fillRect(bar_rect, track)
+        filled = QRect(bar_rect)
+        filled.setWidth(int(bar_rect.width() * fraction))
+        painter.fillRect(filled, color)
+
+    @staticmethod
+    def _status_label_and_color(status: str) -> tuple[str, QColor]:
+        def _tr(text: str) -> str:
+            return QCoreApplication.translate("PageListView", text)
+
+        mapping = {
+            STATUS_QUEUED: (_tr("Queued"), QColor(dayu_theme.secondary_text_color)),
+            STATUS_PROCESSING: (_tr("Processing…"), QColor(dayu_theme.info_color)),
+            STATUS_DONE: (_tr("Done"), QColor(dayu_theme.success_color)),
+            STATUS_FAILED: (_tr("Failed"), QColor(dayu_theme.error_color)),
+        }
+        return mapping.get(status, (str(status), QColor(dayu_theme.secondary_text_color)))
 
     def sizeHint(self, option, index):
         return QSize(self.THUMB_SIZE.width() + 120, self.ROW_HEIGHT)
@@ -99,6 +180,8 @@ class PageListView(QListWidget):
     del_img = Signal(list)
     toggle_skip_img = Signal(list, bool)  # list of images, bool for skip status (True=skip, False=unskip)
     translate_imgs = Signal(list)
+    retry_imgs = Signal(list)  # re-run the batch for these pages with the original settings
+    export_imgs = Signal(list)  # render these pages into a folder the user picks
     order_changed = Signal(list)  # reordered item identities (file paths when available)
 
     def __init__(self) -> None:
@@ -202,6 +285,14 @@ class PageListView(QListWidget):
         translate_act = menu.addAction(self.tr('Translate'))
         translate_act.triggered.connect(self.translate_selected_items)
 
+        # Only offer a retry for pages the last batch actually failed on.
+        if self._selection_has_failed_page(selected):
+            retry_act = menu.addAction(self.tr('Retry this page'))
+            retry_act.triggered.connect(self.retry_selected_items)
+
+        export_act = menu.addAction(self.tr('Export Selected...'))
+        export_act.triggered.connect(self.export_selected_items)
+
         menu.exec_(event.globalPos())
         super().contextMenuEvent(event)
 
@@ -246,5 +337,52 @@ class PageListView(QListWidget):
         selected = self.selectedItems()
         if not selected:
             return
-        names = [item.text() for item in selected]
-        self.translate_imgs.emit(names)
+        # Emit stable paths: pages from different chapters often share a
+        # filename, so basenames can't identify a row.
+        self.translate_imgs.emit([self._item_identity(item) for item in selected])
+
+    def retry_selected_items(self):
+        selected = self.selectedItems()
+        if not selected:
+            return
+        self.retry_imgs.emit([self._item_identity(item) for item in selected])
+
+    def _selection_has_failed_page(self, selected=None) -> bool:
+        """True when at least one selected row failed in the last batch."""
+        if selected is None:
+            selected = self.selectedItems()
+        return any(item.data(PAGE_STATUS_ROLE) == STATUS_FAILED for item in selected)
+
+    def export_selected_items(self):
+        selected = self.selectedItems()
+        if not selected:
+            return
+        self.export_imgs.emit([self._item_identity(item) for item in selected])
+
+    # ------------------------------------------------------------------
+    # Batch status
+    # ------------------------------------------------------------------
+    def set_page_status(self, path: str, status: str, progress: float | None = None) -> None:
+        """Tag the row for `path` with a batch status and repaint just that row."""
+        for row in range(self.count()):
+            item = self.item(row)
+            if item is None or self._item_identity(item) != path:
+                continue
+            item.setData(PAGE_STATUS_ROLE, status or None)
+            if progress is not None:
+                item.setData(PAGE_PROGRESS_ROLE, float(progress))
+            elif not status:
+                item.setData(PAGE_PROGRESS_ROLE, None)
+            index = self.model().index(row, 0)
+            if index.isValid():
+                self.viewport().update(self.visualRect(index))
+            return
+
+    def clear_page_statuses(self) -> None:
+        for row in range(self.count()):
+            item = self.item(row)
+            if item is None:
+                continue
+            item.setData(PAGE_STATUS_ROLE, None)
+            item.setData(PAGE_PROGRESS_ROLE, None)
+        self.viewport().update()

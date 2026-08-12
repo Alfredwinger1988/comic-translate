@@ -90,6 +90,12 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.theme_combo.currentTextChanged.connect(self.on_theme_changed)
         self.ui.lang_combo.currentTextChanged.connect(self.on_language_changed)
         self.ui.translator_combo.currentTextChanged.connect(self._sync_extra_context_limit)
+        self.ui.translator_combo.currentTextChanged.connect(
+            lambda _=None: self._sync_custom_system_prompt_availability()
+        )
+        self.login_state_changed.connect(
+            lambda _=None: self._sync_custom_system_prompt_availability()
+        )
         self.ui.font_browser.sig_files_changed.connect(self.import_font)
         self.ui.shortcuts_page.shortcut_changed.connect(self.on_shortcut_changed)
         self.ui.sign_in_button.clicked.connect(self.start_sign_in)
@@ -97,10 +103,36 @@ class SettingsPage(QtWidgets.QWidget):
         self.ui.sign_out_button.clicked.connect(self.sign_out)
         self.ui.check_update_button.clicked.connect(self.check_for_updates)
         self._sync_extra_context_limit(self.ui.translator_combo.currentText())
+        self._sync_custom_system_prompt_availability()
 
     def _sync_extra_context_limit(self, translator: str) -> None:
         normalized = self.ui.reverse_mappings.get(translator, translator)
         self.ui.llms_page.set_extra_context_unlimited(normalized == "Custom")
+
+    def _sync_custom_system_prompt_availability(self) -> None:
+        """Grey out the custom system prompt when the active engine can't use it.
+
+        With a signed-in ComicLabs account every engine except "Custom" is
+        proxied through the web API (see TranslationFactory._get_engine_class),
+        and that request carries no custom-instructions field — so the setting
+        would be silently dropped. Say so instead.
+        """
+        translator = self.ui.translator_combo.currentText()
+        normalized = self.ui.reverse_mappings.get(translator, translator)
+        try:
+            hosted = self.is_logged_in() and normalized != "Custom"
+        except Exception:
+            hosted = False
+
+        if hosted:
+            reason = self.tr(
+                "Unavailable with a ComicLabs account: translation runs on the server, "
+                "which accepts no custom system instructions. Sign out and use your own "
+                "API key, or pick the \"Custom\" translator, to enable this."
+            )
+        else:
+            reason = ""
+        self.ui.llms_page.set_custom_system_prompt_supported(not hosted, reason)
 
     def on_theme_changed(self, theme: str):
         self.theme_changed.emit(theme)
@@ -125,11 +157,61 @@ class SettingsPage(QtWidgets.QWidget):
             return False
         return self.ui.use_gpu_checkbox.isChecked()
 
+    def is_page_language_detection_enabled(self) -> bool:
+        """Whether a batch run may replace a page's "Auto" source language.
+
+        Opt-in, default off: turning it on changes which OCR engine a page is
+        routed to, so existing projects must keep their current behaviour until
+        the user asks for the new one.
+        """
+        return bool(self.ui.detect_page_language_checkbox.isChecked())
+
     def get_llm_settings(self):
         return {
             'extra_context': self.ui.extra_context.toPlainText(),
             'image_input_enabled': self.ui.image_checkbox.isChecked(),
+            'custom_system_instructions': self.ui.custom_system_instructions.toPlainText(),
+            'custom_system_instructions_enabled': self.ui.enable_custom_system_prompt.isChecked(),
         }
+
+    def get_retry_settings(self):
+        """Retry/backoff configuration for transient translation failures."""
+        return self.ui.llms_page.get_retry_settings()
+
+    @staticmethod
+    def _decode_prompt_presets(raw) -> dict:
+        """Parse the JSON blob holding named custom-prompt presets.
+
+        Older installs have no such key (or a corrupted one); return an empty
+        library instead of raising so settings loading never breaks.
+        """
+        if not raw or not isinstance(raw, str):
+            return {}
+        try:
+            data = json.loads(raw)
+        except (ValueError, TypeError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _save_retry_settings(self, settings: QSettings) -> None:
+        settings.beginGroup('llm')
+        settings.setValue(
+            'retry_settings',
+            json.dumps(self.get_retry_settings()),
+        )
+        settings.endGroup()
+
+    def _save_prompt_presets(self, settings: QSettings) -> None:
+        presets = self.ui.llms_page.get_prompt_presets()
+        settings.beginGroup('llm')
+        if presets:
+            settings.setValue(
+                'custom_system_prompt_presets',
+                json.dumps(presets, ensure_ascii=False),
+            )
+        else:
+            settings.remove('custom_system_prompt_presets')
+        settings.endGroup()
 
     def get_export_settings(self):
         owner = self.window()
@@ -207,6 +289,7 @@ class SettingsPage(QtWidgets.QWidget):
                 'detector': self.get_tool_selection('detector'),
                 'inpainter': self.get_tool_selection('inpainter'),
                 'use_gpu': self.is_gpu_enabled(),
+                'detect_page_language': self.is_page_language_detection_enabled(),
                 'hd_strategy': self.get_hd_strategy_settings()
             },
             'llm': self.get_llm_settings(),
@@ -297,6 +380,13 @@ class SettingsPage(QtWidgets.QWidget):
         settings.remove('archive_save_as')
         settings.endGroup()
 
+        # Retry settings are stored as a JSON blob (they contain floats that the
+        # generic group writer would store as strings without a type hint).
+        self._save_retry_settings(settings)
+
+        # Presets are a JSON blob, so they bypass the generic group writer.
+        self._save_prompt_presets(settings)
+
         # Save credentials separately if save_keys is checked
         credentials = self.get_credentials()
         save_keys = self.ui.save_keys_checkbox.isChecked()
@@ -317,6 +407,14 @@ class SettingsPage(QtWidgets.QWidget):
     def load_settings(self):
         self._loading_settings = True
         settings = QSettings("ComicLabs", "ComicTranslate")
+
+        # Registry entries must be selectable before the saved selection is
+        # restored, otherwise a model that only exists in the registry would
+        # leave the combo empty after a restart.
+        try:
+            self.ui.refresh_registry_combos()
+        except Exception:
+            pass
 
         # Load language
         language = settings.value('language', 'English')
@@ -364,6 +462,11 @@ class SettingsPage(QtWidgets.QWidget):
         else:
             self.ui.use_gpu_checkbox.setChecked(False)
 
+        # Absent in projects/installs from before per-page detection existed.
+        self.ui.detect_page_language_checkbox.setChecked(
+            settings.value('detect_page_language', False, type=bool)
+        )
+
         # Load HD strategy settings
         settings.beginGroup('hd_strategy')
         strategy = settings.value('strategy', 'Resize')
@@ -385,6 +488,20 @@ class SettingsPage(QtWidgets.QWidget):
         settings.beginGroup('llm')
         self.ui.extra_context.setPlainText(settings.value('extra_context', ''))
         self.ui.image_checkbox.setChecked(settings.value('image_input_enabled', False, type=bool))
+        self.ui.custom_system_instructions.setPlainText(
+            settings.value('custom_system_instructions', '', type=str)
+        )
+        self.ui.enable_custom_system_prompt.setChecked(
+            settings.value('custom_system_instructions_enabled', False, type=bool)
+        )
+        self.ui.llms_page.set_prompt_presets(
+            self._decode_prompt_presets(settings.value('custom_system_prompt_presets', '', type=str))
+        )
+        # Retry/backoff settings; absent in projects/installs before this
+        # feature existed, so defaults are applied.
+        self.ui.llms_page.set_retry_settings(
+            self._decode_prompt_presets(settings.value('retry_settings', '', type=str))
+        )
         settings.endGroup()
 
         # Load export settings

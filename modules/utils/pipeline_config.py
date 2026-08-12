@@ -23,6 +23,46 @@ def get_inpainter_backend(inpainter_key: str) -> str:
     inpainter_cls = inpaint_map[inpainter_key]
     return getattr(inpainter_cls, "preferred_backend", "onnx")
 
+
+def resolve_extra_context(main_page, settings_page):
+    """The extra context for the current translation run.
+
+    The settings page provides the user's global ``extra_context``; the
+    project glossary is merged in on top when the main page carries a
+    glossary store. Using this everywhere a translation request is built means
+    a glossary change automatically invalidates the translation cache (the
+    cache key includes the full context).
+    """
+    if settings_page is None:
+        settings_page = resolve_pipeline_settings(main_page)
+    try:
+        extra_context = settings_page.get_llm_settings().get("extra_context", "")
+    except Exception:
+        extra_context = ""
+    store = getattr(main_page, "glossary_store", None)
+    if store is not None:
+        try:
+            return store.merged_extra_context(extra_context or "")
+        except Exception:
+            return extra_context
+    return extra_context or ""
+
+
+def resolve_pipeline_settings(main_page):
+    """Settings object the pipeline should read for the current run.
+
+    Normally the live settings page. While a "retry this page" run is active,
+    the controller points this at a frozen snapshot of the settings the
+    original batch used, so a retry cannot silently pick up a different model,
+    language or custom system prompt. Stand-in main-page objects that only
+    carry ``settings_page`` keep working.
+    """
+    getter = getattr(main_page, "active_pipeline_settings", None)
+    if callable(getter):
+        return getter()
+    return main_page.settings_page
+
+
 def get_config(settings_page: SettingsPage):
     strategy_settings = settings_page.get_hd_strategy_settings()
     if strategy_settings['strategy'] == settings_page.ui.tr("Resize"):

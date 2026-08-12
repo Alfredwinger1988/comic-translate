@@ -211,6 +211,8 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.crop_margin_spinbox = self.tools_page.crop_margin_spinbox
         self.crop_trigger_spinbox = self.tools_page.crop_trigger_spinbox
         self.use_gpu_checkbox = self.tools_page.use_gpu_checkbox
+        self.detect_page_language_checkbox = self.tools_page.detect_page_language_checkbox
+        self.model_registry_button = self.tools_page.model_registry_button
 
         # Credentials
         self.save_keys_checkbox = self.credentials_page.save_keys_checkbox
@@ -219,6 +221,12 @@ class SettingsPageUI(QtWidgets.QWidget):
         # LLMs
         self.image_checkbox = self.llms_page.image_checkbox
         self.extra_context = self.llms_page.extra_context
+        self.custom_system_instructions = self.llms_page.custom_system_instructions
+        self.enable_custom_system_prompt = self.llms_page.enable_custom_system_prompt
+        self.retry_enabled_checkbox = self.llms_page.retry_enabled_checkbox
+        self.retry_max_attempts_spin = self.llms_page.retry_max_attempts_spin
+        self.retry_base_delay_spin = self.llms_page.retry_base_delay_spin
+        self.retry_max_delay_spin = self.llms_page.retry_max_delay_spin
 
         # Text rendering
         self.min_font_spinbox = self.text_rendering_page.min_font_spinbox
@@ -348,3 +356,34 @@ class SettingsPageUI(QtWidgets.QWidget):
         self.content_scroll.updateGeometry()
         # Reset scroll position
         self.content_scroll.verticalScrollBar().setValue(0)
+
+    def refresh_registry_combos(self):
+        """Reconcile the translator / OCR combos with the model registry.
+
+        Called after the registry dialog saves: any new entries become
+        selectable immediately. Built-in entries stay put; the current
+        selection is preserved when it is still present.
+        """
+        from modules.utils.model_registry import get_llm_model_map, get_ocr_model_map
+
+        current_translator = self.translator_combo.currentText()
+        self.translator_combo.blockSignals(True)
+        self.translator_combo.clear()
+        self.translator_combo.addItems(self.supported_translators)
+        for key in get_llm_model_map():
+            if self.translator_combo.findText(key) == -1:
+                self.translator_combo.addItem(key)
+        if self.translator_combo.findText(current_translator) != -1:
+            self.translator_combo.setCurrentText(current_translator)
+        self.translator_combo.blockSignals(False)
+
+        current_ocr = self.ocr_combo.currentText()
+        self.ocr_combo.blockSignals(True)
+        self.ocr_combo.clear()
+        self.ocr_combo.addItems(self.ocr_engines)
+        for key in get_ocr_model_map():
+            if self.ocr_combo.findText(key) == -1:
+                self.ocr_combo.addItem(key)
+        if self.ocr_combo.findText(current_ocr) != -1:
+            self.ocr_combo.setCurrentText(current_ocr)
+        self.ocr_combo.blockSignals(False)

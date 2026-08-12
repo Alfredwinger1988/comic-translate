@@ -13,8 +13,15 @@ from modules.detection.processor import TextBlockDetector
 from modules.translation.processor import Translator
 from modules.utils.device import resolve_device
 from modules.utils.exceptions import InsufficientCreditsException
+from modules.utils.language_utils import detect_confident_source_language
 from modules.utils.image_utils import generate_mask
-from modules.utils.pipeline_config import get_config, get_inpainter_backend, inpaint_map
+from modules.utils.pipeline_config import (
+    get_config,
+    get_inpainter_backend,
+    inpaint_map,
+    resolve_extra_context,
+    resolve_pipeline_settings,
+)
 from modules.utils.textblock import TextBlock, sort_blk_list
 from modules.utils.translator_utils import is_renderable_translation
 from pipeline.inpainting import call_inpaint_image
@@ -62,11 +69,11 @@ class ChunkMixin:
     def _ensure_detector(self: WebtoonBatchProcessor):
         if self.block_detection.block_detector_cache is None:
             self.block_detection.block_detector_cache = TextBlockDetector(
-                self.main_page.settings_page
+                resolve_pipeline_settings(self.main_page)
             )
 
     def _ensure_inpainter(self: WebtoonBatchProcessor):
-        settings_page = self.main_page.settings_page
+        settings_page = resolve_pipeline_settings(self.main_page)
         inpainter_key = settings_page.get_tool_selection("inpainter")
         if (
             self.inpainting.inpainter_cache is None
@@ -121,6 +128,23 @@ class ChunkMixin:
         source_lang_en = self.main_page.lang_mapping.get(source_lang, source_lang)
         self.block_detection.annotate_language_if_auto(image, blocks, source_lang_en)
 
+        # Same opt-in per-page detection as the single-image batch path: store
+        # the recognised language for every affected page instead of leaving it
+        # on "Auto".
+        settings_page = resolve_pipeline_settings(self.main_page)
+        for path in affected_paths:
+            page_source = self.main_page.image_states.get(path, {}).get("source_lang")
+            if page_source != "Auto":
+                continue
+            detected = ""
+            try:
+                if settings_page.is_page_language_detection_enabled():
+                    detected = detect_confident_source_language(blocks)
+            except AttributeError:
+                pass
+            if detected:
+                self.main_page.page_language_detected.emit(path, detected)
+
         self.ocr_handler.ocr.initialize(self.main_page, source_lang)
         try:
             self.ocr_handler.ocr.process(image, blocks)
@@ -147,7 +171,7 @@ class ChunkMixin:
     ) -> None:
         if not blocks:
             return
-        extra_context = self.main_page.settings_page.get_llm_settings()["extra_context"]
+        extra_context = resolve_extra_context(self.main_page, None)
         translator = Translator(self.main_page, source_lang, target_lang)
         try:
             translator.translate(blocks, image, extra_context)
@@ -167,7 +191,7 @@ class ChunkMixin:
     ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
         if not blocks:
             return None, None
-        config = get_config(self.main_page.settings_page)
+        config = get_config(resolve_pipeline_settings(self.main_page))
         mask_blocks: List[TextBlock] = []
         img_h, img_w = image.shape[:2]
         for block in blocks:

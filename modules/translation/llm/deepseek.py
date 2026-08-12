@@ -1,7 +1,17 @@
 from typing import Any
 
 from .gpt import GPTTranslation
-from ...utils.translator_utils import MODEL_MAP
+from ...utils.model_registry import get_llm_model_map
+
+
+_MODEL_MAP = None
+
+
+def _get_model_map():
+    global _MODEL_MAP
+    if _MODEL_MAP is None:
+        _MODEL_MAP = get_llm_model_map()
+    return _MODEL_MAP
 
 
 class DeepseekTranslation(GPTTranslation):
@@ -28,4 +38,4 @@ class DeepseekTranslation(GPTTranslation):
         self.model_name = model_name
         credentials = settings.get_credentials(settings.ui.tr('Deepseek'))
         self.api_key = credentials.get('api_key', '')
-        self.model = MODEL_MAP.get(self.model_name)
+        self.model = _get_model_map().get(self.model_name)

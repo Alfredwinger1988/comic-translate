@@ -4,7 +4,18 @@ import requests
 import json
 
 from .base import BaseLLMTranslation
-from ...utils.translator_utils import MODEL_MAP
+from ...utils.model_registry import get_llm_model_map
+
+
+_MODEL_MAP = None
+
+
+def _get_model_map():
+    global _MODEL_MAP
+    if _MODEL_MAP is None:
+        _MODEL_MAP = get_llm_model_map()
+    return _MODEL_MAP
+from ...utils.retry import with_retry
 
 
 class GPTTranslation(BaseLLMTranslation):
@@ -32,7 +43,7 @@ class GPTTranslation(BaseLLMTranslation):
         self.model_name = model_name
         credentials = settings.get_credentials(settings.ui.tr('Open AI GPT'))
         self.api_key = credentials.get('api_key', '')
-        self.model = MODEL_MAP.get(self.model_name)
+        self.model = _get_model_map().get(self.model_name)
     
     def _perform_translation(self, user_prompt: str, system_prompt: str, image: np.ndarray) -> str:
         """
@@ -88,7 +99,11 @@ class GPTTranslation(BaseLLMTranslation):
             "top_p": self.top_p,
         }
 
-        return self._make_api_request(payload, headers)
+        return with_retry(
+            lambda: self._make_api_request(payload, headers),
+            getattr(self, "_settings_ref", None),
+            label=f"OpenAI-compatible API ({self.model_name})",
+        )
     
     def _make_api_request(self, payload, headers):
         """

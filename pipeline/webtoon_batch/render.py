@@ -16,6 +16,7 @@ from modules.rendering.render import get_best_render_area, is_vertical_block, py
 from modules.utils.image_utils import get_smart_text_color
 from modules.utils.language_utils import get_language_code, is_no_space_lang
 from modules.utils.textblock import TextBlock
+from modules.utils.pipeline_config import resolve_pipeline_settings
 from modules.utils.translator_utils import format_translations, get_raw_text, get_raw_translation, is_renderable_translation
 
 if TYPE_CHECKING:
@@ -220,7 +221,7 @@ class RenderMixin:
             self.log_skipped_image(directory, timestamp, image_path, reason)
             return
 
-        settings_page = self.main_page.settings_page
+        settings_page = resolve_pipeline_settings(self.main_page)
         export_settings = settings_page.get_export_settings()
 
         if export_settings["export_inpainted_image"]:

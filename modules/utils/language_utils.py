@@ -158,6 +158,21 @@ def resolve_auto_source_language(blocks: list, source_language: str) -> str:
     return get_source_language_for_script(dominant_script) if dominant_script else "Auto"
 
 
+def detect_confident_source_language(blocks: list, threshold: float = 0.7) -> str:
+    """Language to *store* on a page, or "" when the page is not clear-cut.
+
+    Unlike :func:`resolve_auto_source_language` this never falls back to a
+    zero-threshold guess: a value written into the project and shown in the
+    language combo should not be a coin flip on a mixed page. Latin script also
+    yields "" because the script alone cannot tell English from Italian.
+    """
+    dominant_script = get_dominant_page_script(blocks, threshold)
+    if not dominant_script:
+        return ""
+    language = get_source_language_for_script(dominant_script)
+    return "" if language == "Auto" else language
+
+
 def _block_area(block) -> float:
     try:
         x1, y1, x2, y2 = block.xyxy

@@ -5,6 +5,7 @@ from PySide6 import QtCore
 from modules.detection.processor import TextBlockDetector
 from modules.detection.script_detection import ScriptDetector
 from modules.utils.textblock import TextBlock, sort_blk_list
+from modules.utils.pipeline_config import resolve_pipeline_settings
 from modules.rendering.render import get_best_render_area
 from pipeline.webtoon_utils import get_first_visible_block
 from app.ui.commands.box import ReplaceDetectedBlocksCommand
@@ -81,7 +82,7 @@ class BlockDetectionHandler:
     def detect_blocks(self, load_rects=True):
         if self.main_page.image_viewer.hasPhoto():
             if self.block_detector_cache is None:
-                self.block_detector_cache = TextBlockDetector(self.main_page.settings_page)
+                self.block_detector_cache = TextBlockDetector(resolve_pipeline_settings(self.main_page))
             
             # In webtoon mode, detect text only in the currently visible area
             if self.main_page.webtoon_mode:

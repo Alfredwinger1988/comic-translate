@@ -4,6 +4,7 @@ import uuid
 
 from .base import TraditionalTranslation
 from ..utils.textblock import TextBlock
+from ..utils.retry import with_retry
 
 
 class MicrosoftTranslation(TraditionalTranslation):
@@ -25,7 +26,7 @@ class MicrosoftTranslation(TraditionalTranslation):
         credentials = settings.get_credentials(settings.ui.tr("Microsoft Azure"))
         self.api_key = credentials['api_key_translator']
         self.region = credentials['region_translator']
-        
+        self._settings_ref = settings
     def translate(self, blk_list: list[TextBlock]) -> list[TextBlock]:
         endpoint = "https://api.cognitive.microsofttranslator.com"
         path = '/translate'
@@ -70,15 +71,13 @@ class MicrosoftTranslation(TraditionalTranslation):
             if not body:
                 continue
             
-            # Make the request
-            response = requests.post(
-                constructed_url, 
-                headers=headers, 
-                params=params, 
-                json=body,
-                timeout=30
+            # Make the request (retried on transient failures; raise_for_status
+            # happens inside so a retryable status actually reaches the loop)
+            response = with_retry(
+                lambda: self._post_microsoft(constructed_url, headers, params, body),
+                getattr(self, "_settings_ref", None),
+                label=f"Microsoft Translator ({self.target_lang_code})",
             )
-            response.raise_for_status()
             
             # Process the response
             translations = response.json()
@@ -91,7 +90,13 @@ class MicrosoftTranslation(TraditionalTranslation):
                         blk_list[block_idx].translation = translation_result['translations'][0]['text']
             
         return blk_list
-    
+
+    def _post_microsoft(self, url, headers, params, body) -> requests.Response:
+        """POST to the Microsoft Translator endpoint and surface errors."""
+        resp = requests.post(url, headers=headers, params=params, json=body, timeout=30)
+        resp.raise_for_status()
+        return resp
+
     def preprocess_language_code(self, lang_code: str) -> str:
         """
         Preprocess language codes to match Microsoft Translator API supported formats.

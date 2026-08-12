@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 from modules.translation.processor import Translator
 from modules.utils.translator_utils import set_upper_case
 from modules.utils.language_utils import to_canonical_language_name
+from modules.utils.pipeline_config import resolve_extra_context, resolve_pipeline_settings
 from pipeline.webtoon_utils import filter_and_convert_visible_blocks, restore_original_block_coordinates
 from .cache_manager import CacheManager
 
@@ -39,9 +40,9 @@ class TranslationHandler:
             self.main_page.lang_mapping,
         )
         if self.main_page.image_viewer.hasPhoto() and self.main_page.blk_list:
-            settings_page = self.main_page.settings_page
+            settings_page = resolve_pipeline_settings(self.main_page)
             image = self.main_page.image_viewer.get_image_array()
-            extra_context = settings_page.get_llm_settings()['extra_context']
+            extra_context = resolve_extra_context(self.main_page, settings_page)
             translator_key = settings_page.get_tool_selection('translator')
 
             upper_case = settings_page.ui.uppercase_checkbox.isChecked()
@@ -147,8 +148,8 @@ class TranslationHandler:
             return
         
         # Perform translation on the visible image with filtered blocks
-        settings_page = self.main_page.settings_page
-        extra_context = settings_page.get_llm_settings()['extra_context']
+        settings_page = resolve_pipeline_settings(self.main_page)
+        extra_context = resolve_extra_context(self.main_page, settings_page)
         upper_case = settings_page.ui.uppercase_checkbox.isChecked()
         
         translator = Translator(self.main_page, source_lang, target_lang)
