@@ -1,0 +1,106 @@
+# -*- mode: python ; coding: utf-8 -*-
+import os
+
+block_cipher = None
+
+repo_root = os.path.abspath(SPECPATH)
+
+a = Analysis(
+    [os.path.join(repo_root, "comic.py")],
+    pathex=[repo_root],
+    binaries=[],
+    datas=[
+        (os.path.join(repo_root, "resources"), "resources"),
+        (os.path.join(repo_root, "app"), "app"),
+        (os.path.join(repo_root, "modules"), "modules"),
+        (os.path.join(repo_root, "pipeline"), "pipeline"),
+        (os.path.join(repo_root, "imkit"), "imkit"),
+        (os.path.join(repo_root, "controller.py"), "."),
+    ],
+    hiddenimports=[
+        "app",
+        "app.ui",
+        "app.ui.dayu_widgets",
+        "app.ui.main_window",
+        "app.controllers",
+        "app.account",
+        "app.projects",
+        "modules",
+        "modules.detection",
+        "modules.inpainting",
+        "modules.ocr",
+        "modules.rendering",
+        "modules.translation",
+        "modules.utils",
+        "pipeline",
+        "imkit",
+        "QPillow",
+        "onnxruntime",
+        "PySide6.QtSvg",
+        "PySide6.QtNetwork",
+        "PySide6.QtXml",
+        "shiboken6",
+        "numpy",
+        "cv2",
+        "PIL",
+        "requests",
+        "rarfile",
+        "py7zr",
+        "pypdfium2",
+        "keyring.backends",
+        "keyring.backends.Windows",
+        "PhotoshopAPI",
+        "send2trash",
+        "PyJWT",
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[
+        "tkinter",
+        "unittest",
+        "pydoc",
+        "doctest",
+        "matplotlib",
+        "PySide6.QtQml",
+        "PySide6.QtQuick",
+        "PySide6.QtMultimedia",
+        "scipy",
+    ],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name="Comic Translate",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=os.path.join(repo_root, "resources", "icons", "icon.ico"),
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name="Comic Translate",
+)

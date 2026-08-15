@@ -18,6 +18,12 @@ venv/
 pyproject.toml
 uv.lock
 
+# PyInstaller build artifacts
+build/
+dist/
+*.spec
+!ct-windows.spec
+
 # Test files
 test_*.py
 demo_*.py

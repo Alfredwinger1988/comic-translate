@@ -1,0 +1,55 @@
+name: Build Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        run: pyinstaller ct-windows.spec --noconfirm --clean
+
+      - name: Package build
+        run: |
+          $version = (Get-Content app/version.py | Select-String '__version__\s*=\s*"(.*)"').Matches.Groups[1].Value
+          echo "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Compress-Archive -Path "dist/Comic Translate" -DestinationPath "Comic-Translate-windows-$version.zip"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: Comic-Translate-windows
+          path: "Comic-Translate-windows-*.zip"
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create/Update Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "Comic-Translate-windows-*.zip"
+          name: "Comic Translate ${{ env.VERSION }}"
+          tag_name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
