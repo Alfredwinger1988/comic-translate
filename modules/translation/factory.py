@@ -5,6 +5,7 @@ from .base import TranslationEngine
 from .microsoft import MicrosoftTranslation
 from .deepl import DeepLTranslation
 from .yandex import YandexTranslation
+from .google import GoogleTranslation
 from .llm.gpt import GPTTranslation
 from .llm.claude import ClaudeTranslation
 from .llm.gemini import GeminiTranslation
@@ -23,8 +24,13 @@ class TranslationFactory:
     TRADITIONAL_ENGINES = {
         "Microsoft Translator": MicrosoftTranslation,
         "DeepL": DeepLTranslation,
-        "Yandex": YandexTranslation
+        "Yandex": YandexTranslation,
+        "Google Translate": GoogleTranslation,
     }
+
+    # Translators that always run locally and are never proxied through the
+    # ComicLabs web API (Google Translate uses a free keyless endpoint).
+    LOCAL_ONLY_TRANSLATORS = {"Custom", "Google Translate"}
     
     # Map LLM identifiers to their engine classes
     LLM_ENGINE_IDENTIFIERS = {
@@ -78,7 +84,7 @@ class TranslationFactory:
         """Get the appropriate engine class based on translator key."""
 
         access_token = get_token("access_token")
-        if access_token and translator_key not in ['Custom']:
+        if access_token and translator_key not in cls.LOCAL_ONLY_TRANSLATORS:
             return UserTranslator
 
         # First check if it's a traditional translation engine (exact match)

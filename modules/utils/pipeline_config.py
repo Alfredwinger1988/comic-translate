@@ -101,17 +101,23 @@ def validate_translator(main: ComicTranslate, target_lang: str):
     settings = settings_page.get_all_settings()
     credentials = settings.get('credentials', {})
     translator_tool = settings['tools']['translator']
+    normalized = settings_page.ui.value_mappings.get(translator_tool, translator_tool)
 
     if not translator_tool:
         Messages.show_missing_tool_error(main, QCoreApplication.translate("Messages", "Translator"))
         return False
+
+    # Google Translate uses the free public endpoint, so it needs no account
+    # or API key and works without signing in.
+    if normalized == "Google Translate":
+        return True
 
     if not settings_page.is_logged_in():
         Messages.show_not_logged_in_error(main)
         return False
 
     # Credential checks
-    if "Custom" in translator_tool:
+    if normalized == "Custom":
         # Custom requires api_key, api_url, and model to be configured LOCALLY
         service = tr('Custom')
         creds = credentials.get(service, {})

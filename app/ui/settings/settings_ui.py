@@ -75,6 +75,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr("Claude-4.6-Sonnet"),
             self.tr("Claude-4.5-Haiku"),
             self.tr("Deepseek"),
+            self.tr("Google Translate"),
             self.tr("Custom"),
         ]
         
@@ -121,6 +122,7 @@ class SettingsPageUI(QtWidgets.QWidget):
             self.tr("Gemini-2.5-Pro"): "Gemini-2.5-Pro",
             self.tr("Yandex"): "Yandex",
             self.tr("Microsoft Translator"): "Microsoft Translator",
+            self.tr("Google Translate"): "Google Translate",
 
             # OCR mappings
             self.tr("Default"): "Default",

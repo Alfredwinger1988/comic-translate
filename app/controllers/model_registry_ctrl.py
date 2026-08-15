@@ -176,3 +176,10 @@ class ModelRegistryController:
             self.main.settings_page.ui.refresh_registry_combos()
         except Exception:
             pass
+        # Keep the Automatic-mode mirror combos in sync with the registry too.
+        try:
+            sync = getattr(self.main, "sync_automatic_mode_options", None)
+            if callable(sync):
+                sync()
+        except Exception:
+            pass

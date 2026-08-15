@@ -184,7 +184,7 @@ class BatchProcessor:
                 try:
                     self.ocr_handler.ocr.process(image, blk_list)
                     # Cache the OCR results for potential future use
-                    self.cache_manager._cache_ocr_results(cache_key, self.main_page.blk_list)
+                    self.cache_manager._cache_ocr_results(cache_key, blk_list)
                     rtl = True if source_lang == 'Japanese' else False
                     blk_list = sort_blk_list(blk_list, rtl)
                     

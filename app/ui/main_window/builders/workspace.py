@@ -8,6 +8,7 @@ from app.ui.dayu_widgets.button_group import MPushButtonGroup, MToolButtonGroup
 from app.ui.dayu_widgets.check_box import MCheckBox
 from app.ui.dayu_widgets.combo_box import MComboBox, MFontComboBox
 from app.ui.dayu_widgets.divider import MDivider
+from app.ui.dayu_widgets.label import MLabel
 from app.ui.dayu_widgets.line_edit import MLineEdit
 from app.ui.dayu_widgets.loading import MLoading
 from app.ui.dayu_widgets.progress_bar import MProgressBar
@@ -401,8 +402,11 @@ class WorkspaceMixin:
         splitter.setStretchFactor(1, 80)
         splitter.setStretchFactor(2, 10)
 
+        self.auto_options_widget = self._create_auto_options_bar()
+
         content_layout = QtWidgets.QVBoxLayout()
         content_layout.addLayout(header_layout)
+        content_layout.addWidget(self.auto_options_widget)
         content_layout.addWidget(self.progress_bar)
         content_layout.addWidget(splitter)
 
@@ -412,6 +416,42 @@ class WorkspaceMixin:
         content_widget.setLayout(content_layout)
 
         return content_widget
+
+    def _create_auto_options_bar(self):
+        """Tool selectors and export options for Automatic mode.
+
+        These mirror the Settings → Tools / Export widgets; the controller
+        keeps them in sync so the batch pipeline keeps reading settings the
+        same way it always has.
+        """
+        bar = QtWidgets.QWidget()
+        layout = QtWidgets.QHBoxLayout(bar)
+        layout.setContentsMargins(0, 2, 0, 2)
+        layout.setSpacing(8)
+
+        def labeled_combo(label_text: str):
+            label = MLabel(label_text).secondary()
+            combo = MComboBox().small()
+            layout.addWidget(label)
+            layout.addWidget(combo)
+            return combo
+
+        self.auto_translator_combo = labeled_combo(self.tr("Translator"))
+        self.auto_ocr_combo = labeled_combo(self.tr("Text Recognition"))
+        self.auto_detector_combo = labeled_combo(self.tr("Text Detector"))
+        self.auto_inpainter_combo = labeled_combo(self.tr("Inpainter"))
+
+        layout.addSpacing(6)
+        layout.addWidget(MLabel(self.tr("Export")).secondary())
+        self.auto_export_raw_checkbox = MCheckBox(self.tr("Raw Text"))
+        self.auto_export_translated_checkbox = MCheckBox(self.tr("Translated"))
+        self.auto_export_inpainted_checkbox = MCheckBox(self.tr("Inpainted"))
+        layout.addWidget(self.auto_export_raw_checkbox)
+        layout.addWidget(self.auto_export_translated_checkbox)
+        layout.addWidget(self.auto_export_inpainted_checkbox)
+
+        layout.addStretch(1)
+        return bar
 
     def create_tool_button(self, text: str = "", svg: str = "", checkable: bool = False):
         if text:

@@ -158,6 +158,7 @@ class ComicTranslate(ComicTranslateUI):
 
         self.project_ctrl.load_main_page_settings()
         self.settings_page.load_settings()
+        self.sync_automatic_mode_options()
         self.project_ctrl.initialize_autosave()
 
         # Populate the home screen with any previously-saved recent projects
@@ -197,6 +198,7 @@ class ComicTranslate(ComicTranslateUI):
        
         self.manual_radio.clicked.connect(self.manual_mode_selected)
         self.automatic_radio.clicked.connect(self.batch_mode_selected)
+        self.connect_automatic_mode_options()
         
         # Webtoon mode toggle
         self.webtoon_toggle.clicked.connect(self.webtoon_ctrl.toggle_webtoon_mode)
@@ -509,15 +511,94 @@ class ComicTranslate(ComicTranslateUI):
         self.disable_hbutton_group()
         self.translate_button.setEnabled(True)
         self.cancel_button.setEnabled(True)
+        if hasattr(self, "auto_options_widget"):
+            self.auto_options_widget.setVisible(True)
 
     def manual_mode_selected(self):
         self.enable_hbutton_group()
         self.translate_button.setEnabled(False)
         self.cancel_button.setEnabled(False)
+        if hasattr(self, "auto_options_widget"):
+            self.auto_options_widget.setVisible(False)
 
     def on_manual_finished(self):
         self.loading.setVisible(False)
         self.enable_hbutton_group()
+
+    # ------------------------------------------------------------------
+    # Automatic-mode tool selectors (mirror the Settings tools/export widgets)
+    # ------------------------------------------------------------------
+    def _auto_tool_pairs(self):
+        ui = self.settings_page.ui
+        return {
+            "translator": (self.auto_translator_combo, ui.translator_combo),
+            "ocr": (self.auto_ocr_combo, ui.ocr_combo),
+            "detector": (self.auto_detector_combo, ui.detector_combo),
+            "inpainter": (self.auto_inpainter_combo, ui.inpainter_combo),
+        }
+
+    def _auto_export_pairs(self):
+        ui = self.settings_page.ui
+        return {
+            "raw_text": (self.auto_export_raw_checkbox, ui.raw_text_checkbox),
+            "translated_text": (self.auto_export_translated_checkbox, ui.translated_text_checkbox),
+            "inpainted_image": (self.auto_export_inpainted_checkbox, ui.inpainted_image_checkbox),
+        }
+
+    @staticmethod
+    def _set_combo_text(combo, text: str):
+        if combo.currentText() == text:
+            return
+        combo.blockSignals(True)
+        try:
+            if text and combo.findText(text) == -1:
+                combo.addItem(text)
+            combo.setCurrentText(text)
+        finally:
+            combo.blockSignals(False)
+
+    @staticmethod
+    def _set_checkbox_checked(checkbox, state):
+        checked = bool(state)
+        if checkbox.isChecked() != checked:
+            checkbox.blockSignals(True)
+            try:
+                checkbox.setChecked(checked)
+            finally:
+                checkbox.blockSignals(False)
+
+    def connect_automatic_mode_options(self):
+        for auto_combo, settings_combo in self._auto_tool_pairs().values():
+            auto_combo.currentTextChanged.connect(
+                lambda text, sc=settings_combo: self._set_combo_text(sc, text)
+            )
+            settings_combo.currentTextChanged.connect(
+                lambda text, ac=auto_combo: self._set_combo_text(ac, text)
+            )
+        for auto_check, settings_check in self._auto_export_pairs().values():
+            auto_check.stateChanged.connect(
+                lambda state, sc=settings_check: self._set_checkbox_checked(sc, state)
+            )
+            settings_check.stateChanged.connect(
+                lambda state, ac=auto_check: self._set_checkbox_checked(ac, state)
+            )
+
+    def sync_automatic_mode_options(self):
+        for auto_combo, settings_combo in self._auto_tool_pairs().values():
+            auto_combo.blockSignals(True)
+            try:
+                auto_combo.clear()
+                for i in range(settings_combo.count()):
+                    auto_combo.addItem(settings_combo.itemText(i))
+                auto_combo.setCurrentText(settings_combo.currentText())
+            finally:
+                auto_combo.blockSignals(False)
+        for auto_check, settings_check in self._auto_export_pairs().values():
+            auto_check.blockSignals(True)
+            try:
+                auto_check.setChecked(settings_check.isChecked())
+            finally:
+                auto_check.blockSignals(False)
 
     def run_threaded(self, callback: Callable, result_callback: Callable=None,
                     error_callback: Callable=None, finished_callback: Callable=None,
